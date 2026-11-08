@@ -1,15 +1,17 @@
 """
 Cửa sổ chính của ứng dụng SkillProof.
-Hiện tại chứa WelcomeScreen; sau này sẽ mở rộng thêm các màn hình nghiệp vụ.
+Navigation: WelcomeScreen → LoginScreen → DashboardScreen → (logout) → LoginScreen
 """
 
 from __future__ import annotations
 
 from PySide6.QtCore    import Qt
-from PySide6.QtGui     import QIcon
 from PySide6.QtWidgets import QMainWindow, QMessageBox, QStackedWidget
 
-from app.ui.screens.welcome_screen import WelcomeScreen
+from app.ui.screens.welcome_screen   import WelcomeScreen
+from app.ui.screens.login_screen     import LoginScreen
+from app.ui.screens.dashboard_screen import DashboardScreen
+from app.models.user_model           import UserModel
 from app.utils.constants import (
     APP_NAME, WINDOW_MIN_WIDTH, WINDOW_MIN_HEIGHT,
     WINDOW_DEFAULT_WIDTH, WINDOW_DEFAULT_HEIGHT,
@@ -21,6 +23,7 @@ class MainWindow(QMainWindow):
 
     def __init__(self) -> None:
         super().__init__()
+        self._dashboard: DashboardScreen | None = None
         self._setup_window()
         self._setup_central_widget()
         self._show_welcome()
@@ -31,48 +34,71 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(APP_NAME)
         self.setMinimumSize(WINDOW_MIN_WIDTH, WINDOW_MIN_HEIGHT)
         self.resize(WINDOW_DEFAULT_WIDTH, WINDOW_DEFAULT_HEIGHT)
-
-        # Căn giữa màn hình
         screen = self.screen().availableGeometry()
         x = (screen.width()  - WINDOW_DEFAULT_WIDTH)  // 2
         y = (screen.height() - WINDOW_DEFAULT_HEIGHT) // 2
         self.move(x, y)
 
-    # ── Widget trung tâm (stack để chuyển màn hình sau này) ──────────────────
-
     def _setup_central_widget(self) -> None:
         self._stack = QStackedWidget()
         self.setCentralWidget(self._stack)
 
-    # ── Các màn hình ─────────────────────────────────────────────────────────
+    # ── Màn hình chào mừng ───────────────────────────────────────────────────
 
     def _show_welcome(self) -> None:
-        """Hiển thị màn hình chào mừng."""
         self._welcome = WelcomeScreen()
-        self._welcome.on_get_started = self._on_get_started
+        self._welcome.on_get_started = self._on_go_to_login
         self._welcome.on_learn_more  = self._on_learn_more
-
         self._stack.addWidget(self._welcome)
         self._stack.setCurrentWidget(self._welcome)
 
-    # ── Handlers ─────────────────────────────────────────────────────────────
+    # ── Màn hình đăng nhập ───────────────────────────────────────────────────
 
-    def _on_get_started(self) -> None:
-        """
-        Xử lý khi người dùng nhấn 'Bắt đầu sử dụng'.
-        TODO: chuyển sang màn hình Dashboard / Login sau khi lập trình nghiệp vụ.
-        """
-        QMessageBox.information(
-            self,
-            "Sắp ra mắt",
-            "🚀 Chức năng đang được phát triển.\n\nCác tính năng sẽ sớm khả dụng!",
-        )
+    def _show_login(self) -> None:
+        """Khởi tạo LoginScreen lần đầu hoặc reset nếu đã có."""
+        if not hasattr(self, "_login"):
+            self._login = LoginScreen()
+            self._login.on_login_success = self._on_login_success
+            self._login.on_back          = self._on_back_to_welcome
+            self._stack.addWidget(self._login)
+        else:
+            self._login.reset()
+        self._stack.setCurrentWidget(self._login)
+
+    # ── Màn hình dashboard ───────────────────────────────────────────────────
+
+    def _show_dashboard(self, user: UserModel) -> None:
+        """Tạo mới DashboardScreen mỗi lần đăng nhập (user có thể khác)."""
+        # Xóa dashboard cũ nếu có
+        if self._dashboard is not None:
+            self._stack.removeWidget(self._dashboard)
+            self._dashboard.deleteLater()
+            self._dashboard = None
+
+        self._dashboard = DashboardScreen(user)
+        self._dashboard.on_logout = self._on_logout
+        self._stack.addWidget(self._dashboard)
+        self._stack.setCurrentWidget(self._dashboard)
+
+    # ── Handlers navigation ───────────────────────────────────────────────────
+
+    def _on_go_to_login(self) -> None:
+        """Welcome → Login."""
+        self._show_login()
+
+    def _on_back_to_welcome(self) -> None:
+        """Login → Welcome."""
+        self._stack.setCurrentWidget(self._welcome)
+
+    def _on_login_success(self, user: UserModel) -> None:
+        """Login → Dashboard."""
+        self._show_dashboard(user)
+
+    def _on_logout(self) -> None:
+        """Dashboard → Login (reset form)."""
+        self._show_login()
 
     def _on_learn_more(self) -> None:
-        """
-        Xử lý khi người dùng nhấn 'Tìm hiểu thêm'.
-        TODO: mở màn hình giới thiệu / tài liệu.
-        """
         QMessageBox.information(
             self,
             "Về SkillProof",
@@ -92,5 +118,7 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event) -> None:  # noqa: N802
         from app.database.connection import db
+        from app.services.auth_service import auth_service
+        auth_service.logout()
         db.close()
         event.accept()

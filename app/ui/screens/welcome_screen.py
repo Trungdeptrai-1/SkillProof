@@ -7,12 +7,12 @@ from __future__ import annotations
 
 from PySide6.QtCore    import Qt, QPropertyAnimation, QEasingCurve, QPoint, QTimer
 from PySide6.QtGui     import (
-    QColor, QFont, QLinearGradient, QPainter, QPainterPath,
-    QBrush, QPen, QPixmap,
+    QColor, QLinearGradient, QPainter, QPainterPath,
+    QBrush,
 )
 from PySide6.QtWidgets import (
     QWidget, QHBoxLayout, QVBoxLayout, QLabel,
-    QPushButton, QSizePolicy, QSpacerItem, QFrame,
+    QPushButton, QSizePolicy, QFrame,
     QGraphicsOpacityEffect,
 )
 
