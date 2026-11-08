@@ -1,0 +1,86 @@
+# ── Python ───────────────────────────────────────────────────────────────────
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+*.pyd
+.Python
+
+# ── Môi trường ảo ────────────────────────────────────────────────────────────
+.venv/
+venv/
+env/
+ENV/
+
+# ── Biến môi trường & bí mật ─────────────────────────────────────────────────
+.env
+.env.*
+.env.local
+.env.production
+.env.development
+secrets.py
+secrets.json
+secrets.yaml
+secrets.yml
+*_secret*
+*_credentials*
+config.local.py
+
+# ── Cơ sở dữ liệu ────────────────────────────────────────────────────────────
+# KHÔNG commit database — chứa dữ liệu người dùng & mật khẩu hash
+data/
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+
+# ── Giữ các thư mục trống trong Git ─────────────────────────────────────────
+!**/.gitkeep
+
+# ── Logs ─────────────────────────────────────────────────────────────────────
+*.log
+logs/
+data/logs/
+
+# ── Temp & cache ─────────────────────────────────────────────────────────────
+*.tmp
+*.bak
+*.swp
+*~
+.cache/
+
+# ── Build / Distribution ─────────────────────────────────────────────────────
+build/
+dist/
+*.spec
+*.egg-info/
+.eggs/
+
+# ── IDE & Editor ─────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.swp
+*~
+
+# ── Hệ điều hành ────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── Testing ──────────────────────────────────────────────────────────────────
+.pytest_cache/
+.coverage
+htmlcov/
+
+# ── Typing ───────────────────────────────────────────────────────────────────
+.mypy_cache/
+.dmypy.json
+
+# ── Assets generated ─────────────────────────────────────────────────────────
+assets/cache/
