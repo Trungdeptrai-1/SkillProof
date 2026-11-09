@@ -141,6 +141,7 @@ def _apply_migrations(conn: sqlite3.Connection) -> None:
     _mig_001_fix_admin_hash(conn)
     _mig_002_fix_role_constraint(conn)
     _mig_003_remove_hardcoded_admin(conn)
+    _mig_004_create_business_tables(conn)
 
 
 # ── MIG-001 ───────────────────────────────────────────────────────────────────
@@ -324,16 +325,400 @@ def _mig_003_remove_hardcoded_admin(conn: sqlite3.Connection) -> None:
         )
 
 
+# ── MIG-004: Bảng nghiệp vụ Giai đoạn 03 ──────────────────────────────────────
+# 14 bảng mới, không sửa bảng cũ. Thứ tự tạo theo FK dependency.
+
+BUSINESS_SCHEMA_SQL = """
+-- A1. company_profiles (FK→users only, safe first)
+CREATE TABLE IF NOT EXISTS company_profiles (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id       INTEGER NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+    company_name  TEXT    NOT NULL,
+    industry      TEXT,
+    website       TEXT,
+    description   TEXT,
+    logo_path     TEXT,
+    tax_code      TEXT,
+    address       TEXT,
+    is_verified   INTEGER NOT NULL DEFAULT 0,
+    created_at    TEXT    NOT NULL DEFAULT (datetime('now','localtime')),
+    updated_at    TEXT    NOT NULL DEFAULT (datetime('now','localtime'))
+);
+CREATE INDEX IF NOT EXISTS idx_company_profiles_user ON company_profiles(user_id);
+
+-- A2. expert_profiles
+CREATE TABLE IF NOT EXISTS expert_profiles (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id        INTEGER NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+    title          TEXT    NOT NULL,
+    bio            TEXT,
+    specialization TEXT,
+    hourly_rate    REAL,
+    availability   TEXT    NOT NULL DEFAULT 'available'
+                   CHECK(availability IN ('available','busy','unavailable')),
+    is_verified    INTEGER NOT NULL DEFAULT 0,
+    created_at     TEXT    NOT NULL DEFAULT (datetime('now','localtime')),
+    updated_at     TEXT    NOT NULL DEFAULT (datetime('now','localtime'))
+);
+CREATE INDEX IF NOT EXISTS idx_expert_profiles_user ON expert_profiles(user_id);
+
+-- A3. candidate_profiles
+CREATE TABLE IF NOT EXISTS candidate_profiles (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id          INTEGER NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+    headline         TEXT,
+    bio              TEXT,
+    resume_path      TEXT,
+    portfolio_url    TEXT,
+    years_experience INTEGER,
+    created_at       TEXT    NOT NULL DEFAULT (datetime('now','localtime')),
+    updated_at       TEXT    NOT NULL DEFAULT (datetime('now','localtime'))
+);
+CREATE INDEX IF NOT EXISTS idx_candidate_profiles_user ON candidate_profiles(user_id);
+
+-- C1. question_bank (FK→users, skills)
+CREATE TABLE IF NOT EXISTS question_bank (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    expert_id        INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    skill_id         INTEGER REFERENCES skills(id) ON DELETE SET NULL,
+    question_type    TEXT    NOT NULL
+                     CHECK(question_type IN ('multiple_choice','coding','essay')),
+    title            TEXT    NOT NULL,
+    content          TEXT    NOT NULL,
+    difficulty       TEXT    NOT NULL DEFAULT 'medium'
+                     CHECK(difficulty IN ('easy','medium','hard')),
+    points           REAL    NOT NULL DEFAULT 10,
+    test_cases       TEXT,
+    reference_answer TEXT,
+    is_published     INTEGER NOT NULL DEFAULT 0,
+    created_at       TEXT    NOT NULL DEFAULT (datetime('now','localtime')),
+    updated_at       TEXT    NOT NULL DEFAULT (datetime('now','localtime'))
+);
+CREATE INDEX IF NOT EXISTS idx_qb_expert    ON question_bank(expert_id);
+CREATE INDEX IF NOT EXISTS idx_qb_skill     ON question_bank(skill_id);
+CREATE INDEX IF NOT EXISTS idx_qb_type      ON question_bank(question_type);
+CREATE INDEX IF NOT EXISTS idx_qb_published ON question_bank(is_published);
+
+-- C2. question_options (FK→question_bank)
+CREATE TABLE IF NOT EXISTS question_options (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    question_id INTEGER NOT NULL REFERENCES question_bank(id) ON DELETE CASCADE,
+    content     TEXT    NOT NULL,
+    is_correct  INTEGER NOT NULL DEFAULT 0,
+    sort_order  INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_qo_question ON question_options(question_id);
+
+-- D1. exam_papers (FK→skills, users)
+CREATE TABLE IF NOT EXISTS exam_papers (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    title         TEXT    NOT NULL,
+    description   TEXT,
+    skill_id      INTEGER REFERENCES skills(id) ON DELETE SET NULL,
+    created_by     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    total_points  REAL    NOT NULL DEFAULT 100,
+    duration_min  INTEGER NOT NULL DEFAULT 60,
+    is_published  INTEGER NOT NULL DEFAULT 0,
+    created_at    TEXT    NOT NULL DEFAULT (datetime('now','localtime')),
+    updated_at    TEXT    NOT NULL DEFAULT (datetime('now','localtime'))
+);
+CREATE INDEX IF NOT EXISTS idx_ep_skill      ON exam_papers(skill_id);
+CREATE INDEX IF NOT EXISTS idx_ep_created_by ON exam_papers(created_by);
+
+-- D2. exam_paper_questions (N-N: exam_papers ↔ question_bank)
+CREATE TABLE IF NOT EXISTS exam_paper_questions (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    exam_paper_id INTEGER NOT NULL REFERENCES exam_papers(id) ON DELETE CASCADE,
+    question_id   INTEGER NOT NULL REFERENCES question_bank(id) ON DELETE RESTRICT,
+    sort_order    INTEGER NOT NULL DEFAULT 0,
+    points        REAL,
+    UNIQUE(exam_paper_id, question_id)
+);
+CREATE INDEX IF NOT EXISTS idx_epq_paper    ON exam_paper_questions(exam_paper_id);
+CREATE INDEX IF NOT EXISTS idx_epq_question ON exam_paper_questions(question_id);
+
+-- D3. exam_sessions (FK→exam_papers, users)
+CREATE TABLE IF NOT EXISTS exam_sessions (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    exam_paper_id INTEGER NOT NULL REFERENCES exam_papers(id) ON DELETE RESTRICT,
+    candidate_id  INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    company_id    INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    status        TEXT    NOT NULL DEFAULT 'scheduled'
+                  CHECK(status IN ('scheduled','in_progress','completed','cancelled')),
+    scheduled_at  TEXT,
+    started_at    TEXT,
+    completed_at  TEXT,
+    total_score   REAL,
+    max_score     REAL    NOT NULL DEFAULT 100,
+    created_at    TEXT    NOT NULL DEFAULT (datetime('now','localtime'))
+);
+CREATE INDEX IF NOT EXISTS idx_es_paper     ON exam_sessions(exam_paper_id);
+CREATE INDEX IF NOT EXISTS idx_es_candidate ON exam_sessions(candidate_id);
+CREATE INDEX IF NOT EXISTS idx_es_company   ON exam_sessions(company_id);
+CREATE INDEX IF NOT EXISTS idx_es_status    ON exam_sessions(status);
+
+-- D4. exam_answers (FK→exam_sessions, question_bank, users)
+CREATE TABLE IF NOT EXISTS exam_answers (
+    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+    exam_session_id    INTEGER NOT NULL REFERENCES exam_sessions(id) ON DELETE CASCADE,
+    question_id        INTEGER NOT NULL REFERENCES question_bank(id) ON DELETE RESTRICT,
+    answer_text        TEXT,
+    answer_code        TEXT,
+    selected_option_id INTEGER,
+    score              REAL,
+    max_score          REAL    NOT NULL DEFAULT 10,
+    feedback           TEXT,
+    graded_by          INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    graded_at          TEXT,
+    is_graded          INTEGER NOT NULL DEFAULT 0,
+    UNIQUE(exam_session_id, question_id)
+);
+CREATE INDEX IF NOT EXISTS idx_ea_session   ON exam_answers(exam_session_id);
+CREATE INDEX IF NOT EXISTS idx_ea_question  ON exam_answers(question_id);
+CREATE INDEX IF NOT EXISTS idx_ea_graded_by ON exam_answers(graded_by);
+CREATE INDEX IF NOT EXISTS idx_ea_is_graded ON exam_answers(is_graded);
+
+-- E1. exam_grade_revisions (FK→exam_answers, users)
+CREATE TABLE IF NOT EXISTS exam_grade_revisions (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    exam_answer_id INTEGER NOT NULL REFERENCES exam_answers(id) ON DELETE CASCADE,
+    graded_by      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    old_score      REAL,
+    new_score      REAL    NOT NULL,
+    old_feedback   TEXT,
+    new_feedback   TEXT,
+    reason         TEXT,
+    created_at     TEXT    NOT NULL DEFAULT (datetime('now','localtime'))
+);
+CREATE INDEX IF NOT EXISTS idx_gr_answer ON exam_grade_revisions(exam_answer_id);
+CREATE INDEX IF NOT EXISTS idx_gr_grader ON exam_grade_revisions(graded_by);
+
+-- F1. interviews (FK→users)
+CREATE TABLE IF NOT EXISTS interviews (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    candidate_id   INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    company_id     INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    title          TEXT    NOT NULL,
+    description    TEXT,
+    status         TEXT    NOT NULL DEFAULT 'scheduled'
+                  CHECK(status IN ('scheduled','in_progress','completed','cancelled','no_show')),
+    scheduled_at   TEXT    NOT NULL,
+    duration_min   INTEGER NOT NULL DEFAULT 60,
+    meeting_url    TEXT,
+    created_at     TEXT    NOT NULL DEFAULT (datetime('now','localtime'))
+);
+CREATE INDEX IF NOT EXISTS idx_iv_candidate ON interviews(candidate_id);
+CREATE INDEX IF NOT EXISTS idx_iv_company   ON interviews(company_id);
+CREATE INDEX IF NOT EXISTS idx_iv_status    ON interviews(status);
+
+-- F2. interview_participants (FK→interviews, users)
+CREATE TABLE IF NOT EXISTS interview_participants (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    interview_id INTEGER NOT NULL REFERENCES interviews(id) ON DELETE CASCADE,
+    expert_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    role         TEXT    NOT NULL DEFAULT 'interviewer'
+                 CHECK(role IN ('interviewer','observer','moderator')),
+    joined_at    TEXT,
+    UNIQUE(interview_id, expert_id)
+);
+CREATE INDEX IF NOT EXISTS idx_ip_interview ON interview_participants(interview_id);
+CREATE INDEX IF NOT EXISTS idx_ip_expert    ON interview_participants(expert_id);
+
+-- F3. interview_evaluations (FK→interviews, users)
+CREATE TABLE IF NOT EXISTS interview_evaluations (
+    id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+    interview_id         INTEGER NOT NULL REFERENCES interviews(id) ON DELETE CASCADE,
+    expert_id            INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    technical_score      INTEGER CHECK(technical_score BETWEEN 1 AND 5),
+    communication_score  INTEGER CHECK(communication_score BETWEEN 1 AND 5),
+    problem_solving_score INTEGER CHECK(problem_solving_score BETWEEN 1 AND 5),
+    overall_rating       INTEGER CHECK(overall_rating BETWEEN 1 AND 5),
+    feedback             TEXT,
+    recommendation       TEXT CHECK(recommendation IN ('strong_hire','hire','no_hire','strong_no_hire')),
+    created_at           TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+    UNIQUE(interview_id, expert_id)
+);
+CREATE INDEX IF NOT EXISTS idx_ie_interview ON interview_evaluations(interview_id);
+CREATE INDEX IF NOT EXISTS idx_ie_expert    ON interview_evaluations(expert_id);
+
+-- B1. company_expert_contracts (FK→users, N-N with history)
+CREATE TABLE IF NOT EXISTS company_expert_contracts (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    company_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    expert_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    contract_code TEXT    NOT NULL UNIQUE,
+    status        TEXT    NOT NULL DEFAULT 'active'
+                  CHECK(status IN ('active','completed','terminated','cancelled')),
+    start_date    TEXT    NOT NULL DEFAULT (datetime('now','localtime')),
+    end_date      TEXT,
+    notes         TEXT,
+    created_at    TEXT    NOT NULL DEFAULT (datetime('now','localtime'))
+);
+CREATE INDEX IF NOT EXISTS idx_contracts_company ON company_expert_contracts(company_id);
+CREATE INDEX IF NOT EXISTS idx_contracts_expert  ON company_expert_contracts(expert_id);
+CREATE INDEX IF NOT EXISTS idx_contracts_status   ON company_expert_contracts(status);
+
+-- B2. tasks (FK→users, contracts, exam_sessions, interviews — LAST)
+CREATE TABLE IF NOT EXISTS tasks (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    company_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    expert_id       INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    contract_id     INTEGER REFERENCES company_expert_contracts(id) ON DELETE SET NULL,
+    title           TEXT    NOT NULL,
+    description     TEXT,
+    task_type       TEXT    NOT NULL
+                    CHECK(task_type IN ('grading','interview','question_creation','review')),
+    status          TEXT    NOT NULL DEFAULT 'pending'
+                    CHECK(status IN ('pending','in_progress','completed','cancelled')),
+    priority        TEXT    NOT NULL DEFAULT 'normal'
+                    CHECK(priority IN ('low','normal','high','urgent')),
+    assigned_at     TEXT    NOT NULL DEFAULT (datetime('now','localtime')),
+    due_at          TEXT,
+    completed_at    TEXT,
+    exam_session_id INTEGER REFERENCES exam_sessions(id) ON DELETE SET NULL,
+    interview_id    INTEGER REFERENCES interviews(id) ON DELETE SET NULL
+);
+CREATE INDEX IF NOT EXISTS idx_tasks_company ON tasks(company_id);
+CREATE INDEX IF NOT EXISTS idx_tasks_expert  ON tasks(expert_id);
+CREATE INDEX IF NOT EXISTS idx_tasks_status  ON tasks(status);
+CREATE INDEX IF NOT EXISTS idx_tasks_type    ON tasks(task_type);
+"""
+
+BUSINESS_TRIGGERS_SQL = """
+CREATE TRIGGER IF NOT EXISTS trg_company_profiles_updated
+AFTER UPDATE ON company_profiles
+BEGIN
+    UPDATE company_profiles SET updated_at = datetime('now','localtime') WHERE id = NEW.id;
+END;
+CREATE TRIGGER IF NOT EXISTS trg_expert_profiles_updated
+AFTER UPDATE ON expert_profiles
+BEGIN
+    UPDATE expert_profiles SET updated_at = datetime('now','localtime') WHERE id = NEW.id;
+END;
+CREATE TRIGGER IF NOT EXISTS trg_candidate_profiles_updated
+AFTER UPDATE ON candidate_profiles
+BEGIN
+    UPDATE candidate_profiles SET updated_at = datetime('now','localtime') WHERE id = NEW.id;
+END;
+CREATE TRIGGER IF NOT EXISTS trg_question_bank_updated
+AFTER UPDATE ON question_bank
+BEGIN
+    UPDATE question_bank SET updated_at = datetime('now','localtime') WHERE id = NEW.id;
+END;
+CREATE TRIGGER IF NOT EXISTS trg_exam_papers_updated
+AFTER UPDATE ON exam_papers
+BEGIN
+    UPDATE exam_papers SET updated_at = datetime('now','localtime') WHERE id = NEW.id;
+END;
+"""
+
+# Danh sách 14 bảng mới (theo thứ tự DROP ngược lại — con trước cha)
+BUSINESS_TABLES = [
+    "tasks",
+    "company_expert_contracts",
+    "interview_evaluations",
+    "interview_participants",
+    "interviews",
+    "exam_grade_revisions",
+    "exam_answers",
+    "exam_sessions",
+    "exam_paper_questions",
+    "exam_papers",
+    "question_options",
+    "question_bank",
+    "candidate_profiles",
+    "expert_profiles",
+    "company_profiles",
+]
+
+
+def _mig_004_create_business_tables(conn: sqlite3.Connection) -> None:
+    """
+    MIG-004: Tạo 14 bảng nghiệp vụ + 22 index + 5 trigger.
+
+    An toàn:
+    - CREATE TABLE IF NOT EXISTS → không ghi đè bảng đã có.
+    - Không sửa bảng cũ (7 bảng Giai đoạn 00-01).
+    - Kiểm tra bảng cũ trước/sau → không mất dữ liệu.
+
+    Rollback:
+    - Nếu lỗi → DROP các bảng mới đã tạo → bảng cũ không bị ảnh hưởng.
+    """
+    # Kiểm tra đã chạy chưa (idempotent)
+    check = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='company_profiles'"
+    ).fetchone()
+    if check:
+        logger.debug("MIG-004: business tables already exist, skip.")
+        return
+
+    # Lưu danh sách bảng cũ trước migration
+    old_tables = {
+        r[0] for r in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        ).fetchall()
+    }
+
+    created_tables = []
+
+    try:
+        conn.executescript(BUSINESS_SCHEMA_SQL)
+        conn.executescript(BUSINESS_TRIGGERS_SQL)
+        conn.commit()
+
+        # Lấy danh sách bảng hiện tại
+        current_tables = {
+            r[0] for r in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
+        }
+
+        # Verify: tất cả bảng cũ vẫn còn
+        missing_old = old_tables - current_tables
+        if missing_old:
+            raise RuntimeError(f"MIG-004: Bảng cũ bị mất: {missing_old}")
+
+        # Lấy danh sách bảng mới đã tạo
+        created_tables = list(current_tables - old_tables)
+
+        logger.info(
+            "MIG-004: %d business tables + indexes + triggers created.",
+            len([t for t in BUSINESS_TABLES if t in current_tables])
+        )
+
+    except Exception as exc:
+        # Rollback: xóa bảng mới đã tạo (theo thứ tự ngược FK)
+        for table in created_tables:
+            try:
+                conn.execute(f"DROP TABLE IF EXISTS [{table}]")
+            except Exception:
+                pass
+        conn.commit()
+        logger.exception("MIG-004 FAILED, rolled back %d tables: %s",
+                         len(created_tables), exc)
+        raise
+
+
 # ── Tiện ích ──────────────────────────────────────────────────────────────────
 
 def drop_all_tables() -> None:
     """Xoá toàn bộ bảng — CHỈ dùng cho testing."""
-    tables = [
+    # Bảng mới (Giai đoạn 03) — drop theo thứ tự ngược FK
+    business_tables = [
+        "tasks", "company_expert_contracts",
+        "interview_evaluations", "interview_participants", "interviews",
+        "exam_grade_revisions", "exam_answers", "exam_sessions",
+        "exam_paper_questions", "exam_papers",
+        "question_options", "question_bank",
+        "candidate_profiles", "expert_profiles", "company_profiles",
+    ]
+    # Bảng cũ (Giai đoạn 00-01)
+    old_tables = [
         "assessments", "enrollments", "certificates",
         "courses", "skills", "users", "app_settings",
     ]
     conn = db.get_connection()
-    for table in tables:
+    for table in business_tables + old_tables:
         conn.execute(f"DROP TABLE IF EXISTS {table};")
     conn.commit()
     logger.warning("drop_all_tables(): đã xoá toàn bộ bảng CSDL.")

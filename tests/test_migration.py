@@ -301,17 +301,29 @@ class TestCreateAllTables:
         row = fresh_db.fetchone("SELECT * FROM users WHERE username='admin'")
         assert row is None
 
-    def test_fresh_db_seven_tables(self, fresh_db):
+    def test_fresh_db_all_tables(self, fresh_db):
+        """DB mới phải có 22 bảng (7 cũ + 15 mới từ MIG-004)."""
         tables = {
             r["name"] for r in fresh_db.fetchall(
                 "SELECT name FROM sqlite_master WHERE type='table'"
             )
             if not r["name"].startswith("sqlite_")
         }
-        assert tables == {
+        old_tables = {
             "users", "skills", "certificates", "courses",
             "enrollments", "assessments", "app_settings"
         }
+        new_tables = {
+            "company_profiles", "expert_profiles", "candidate_profiles",
+            "question_bank", "question_options",
+            "exam_papers", "exam_paper_questions",
+            "exam_sessions", "exam_answers", "exam_grade_revisions",
+            "interviews", "interview_participants", "interview_evaluations",
+            "company_expert_contracts", "tasks",
+        }
+        assert old_tables <= tables, "Thiếu bảng cũ"
+        assert new_tables <= tables, "Thiếu bảng mới (MIG-004)"
+        assert len(tables) == 22, f"Expected 22, got {len(tables)}"
 
     def test_legacy_db_full_migration(self, legacy_db):
         """
