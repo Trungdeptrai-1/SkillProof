@@ -296,11 +296,37 @@ class _LoginFormPanel(QWidget):
 
         outer.addStretch(2)
 
-        # ── Footer ────────────────────────────────────────────────────────────
-        footer_lbl = QLabel("Liên hệ quản trị viên nếu bạn chưa có tài khoản.")
-        footer_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        footer_lbl.setStyleSheet(f"color:{COLOR_TEXT_MUTED}; font-size:11px; margin-bottom:16px;")
-        outer.addWidget(footer_lbl)
+        # ── Footer: link đăng ký ────────────────────────────────────────────────
+        footer_row = QHBoxLayout()
+        footer_row.addStretch()
+
+        footer_lbl = QLabel("Chưa có tài khoản?")
+        footer_lbl.setStyleSheet(f"color:{COLOR_TEXT_MUTED}; font-size:11px;")
+        footer_row.addWidget(footer_lbl)
+
+        self._register_link = QPushButton("Đăng ký")
+        self._register_link.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._register_link.setStyleSheet(f"""
+            QPushButton {{
+                background: transparent;
+                color: {COLOR_ACCENT};
+                border: none;
+                font-size: 11px;
+                font-weight: 600;
+                padding: 0 2px;
+            }}
+            QPushButton:hover {{ text-decoration: underline; color: {COLOR_NAVY_LIGHT}; }}
+        """)
+        self._register_link.clicked.connect(self._handle_go_register)
+        footer_row.addWidget(self._register_link)
+
+        footer_row.addStretch()
+
+        footer_widget = QWidget()
+        footer_widget.setLayout(footer_row)
+        footer_widget.setStyleSheet("background: transparent;")
+        footer_widget.setFixedHeight(30)
+        outer.addWidget(footer_widget)
 
     # ── Input style ───────────────────────────────────────────────────────────
 
@@ -441,6 +467,7 @@ class LoginScreen(QWidget):
         self.setMinimumSize(WELCOME_WIDTH, WELCOME_HEIGHT)
         self._on_login_success_cb = None
         self._on_back_cb          = None
+        self._on_go_register_cb   = None
         self._setup_ui()
         QTimer.singleShot(80, self._animate_in)
 
@@ -461,6 +488,14 @@ class LoginScreen(QWidget):
     @on_back.setter
     def on_back(self, cb):
         self._on_back_cb = cb
+
+    @property
+    def on_go_register(self):
+        return self._on_go_register_cb
+
+    @on_go_register.setter
+    def on_go_register(self, cb):
+        self._on_go_register_cb = cb
 
     # ── Setup UI ──────────────────────────────────────────────────────────────
 
@@ -574,6 +609,10 @@ class LoginScreen(QWidget):
         self._form_panel.reset_form()
         if callable(self._on_back_cb):
             self._on_back_cb()
+
+    def _handle_go_register(self) -> None:
+        if callable(self._on_go_register_cb):
+            self._on_go_register_cb()
 
     def reset(self) -> None:
         """Reset form khi màn hình được hiển thị lại."""

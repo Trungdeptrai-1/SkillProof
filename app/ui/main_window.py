@@ -1,32 +1,36 @@
 """
-Cửa sổ chính của ứng dụng SkillProof.
-Navigation: WelcomeScreen → LoginScreen → DashboardScreen → (logout) → LoginScreen
+Cửa sổ chính SkillProof.
+Navigation: FirstRunSetup (nếu cần) → Welcome → Login → Dashboard → Logout
 """
 
 from __future__ import annotations
 
-from PySide6.QtCore    import Qt
 from PySide6.QtWidgets import QMainWindow, QMessageBox, QStackedWidget
 
-from app.ui.screens.welcome_screen   import WelcomeScreen
-from app.ui.screens.login_screen     import LoginScreen
-from app.ui.screens.dashboard_screen import DashboardScreen
-from app.models.user_model           import UserModel
+from app.ui.screens.welcome_screen    import WelcomeScreen
+from app.ui.screens.login_screen      import LoginScreen
+from app.ui.screens.register_screen   import RegisterScreen
+from app.ui.screens.dashboard_screen  import DashboardScreen
+from app.ui.screens.first_run_screen  import FirstRunScreen
+from app.models.user_model            import UserModel
 from app.utils.constants import (
-    APP_NAME, WINDOW_MIN_WIDTH, WINDOW_MIN_HEIGHT,
+    APP_NAME,
+    WINDOW_MIN_WIDTH, WINDOW_MIN_HEIGHT,
     WINDOW_DEFAULT_WIDTH, WINDOW_DEFAULT_HEIGHT,
 )
 
 
 class MainWindow(QMainWindow):
-    """Cửa sổ gốc của SkillProof."""
+    """Cửa sổ gốc SkillProof."""
 
     def __init__(self) -> None:
         super().__init__()
         self._dashboard: DashboardScreen | None = None
+        self._first_run: FirstRunScreen | None  = None
+        self._register:  RegisterScreen | None  = None
         self._setup_window()
         self._setup_central_widget()
-        self._show_welcome()
+        self._route_initial()
 
     # ── Cấu hình cửa sổ ──────────────────────────────────────────────────────
 
@@ -43,33 +47,77 @@ class MainWindow(QMainWindow):
         self._stack = QStackedWidget()
         self.setCentralWidget(self._stack)
 
-    # ── Màn hình chào mừng ───────────────────────────────────────────────────
+    # ── Routing ban đầu ───────────────────────────────────────────────────────
+
+    def _route_initial(self) -> None:
+        """Kiểm tra setup_done để chọn màn hình đầu tiên."""
+        from app.database.schema import is_first_run
+        if is_first_run():
+            self._show_first_run()
+        else:
+            self._show_welcome()
+
+    # ── FirstRun Setup ────────────────────────────────────────────────────────
+
+    def _show_first_run(self) -> None:
+        self._first_run = FirstRunScreen()
+        self._first_run.on_setup_complete = self._on_first_run_done
+        self._stack.addWidget(self._first_run)
+        self._stack.setCurrentWidget(self._first_run)
+
+    def _on_first_run_done(self) -> None:
+        """Setup xong → chuyển sang Welcome."""
+        self._show_welcome()
+
+    # ── Welcome ───────────────────────────────────────────────────────────────
 
     def _show_welcome(self) -> None:
-        self._welcome = WelcomeScreen()
-        self._welcome.on_get_started = self._on_go_to_login
-        self._welcome.on_learn_more  = self._on_learn_more
-        self._stack.addWidget(self._welcome)
+        if not hasattr(self, "_welcome"):
+            self._welcome = WelcomeScreen()
+            self._welcome.on_get_started = self._on_go_to_login
+            self._welcome.on_learn_more  = self._on_learn_more
+            self._stack.addWidget(self._welcome)
         self._stack.setCurrentWidget(self._welcome)
 
-    # ── Màn hình đăng nhập ───────────────────────────────────────────────────
+    # ── Login ─────────────────────────────────────────────────────────────────
 
     def _show_login(self) -> None:
-        """Khởi tạo LoginScreen lần đầu hoặc reset nếu đã có."""
         if not hasattr(self, "_login"):
             self._login = LoginScreen()
             self._login.on_login_success = self._on_login_success
             self._login.on_back          = self._on_back_to_welcome
+            self._login.on_go_register   = self._show_register
             self._stack.addWidget(self._login)
         else:
             self._login.reset()
         self._stack.setCurrentWidget(self._login)
 
-    # ── Màn hình dashboard ───────────────────────────────────────────────────
+    # ── Register ──────────────────────────────────────────────────────────────
+
+    def _show_register(self) -> None:
+        """Hiển thị màn hình đăng ký (tạo mới hoặc reset)."""
+        if self._register is not None:
+            self._stack.removeWidget(self._register)
+            self._register.deleteLater()
+            self._register = None
+
+        self._register = RegisterScreen()
+        self._register.on_register_success = self._on_register_success
+        self._register.on_back_to_login    = self._on_back_to_login
+        self._stack.addWidget(self._register)
+        self._stack.setCurrentWidget(self._register)
+
+    def _on_register_success(self, user: UserModel) -> None:
+        """Đăng ký xong → chuyển về Login để user đăng nhập."""
+        self._show_login()
+
+    def _on_back_to_login(self) -> None:
+        """Register → Login."""
+        self._show_login()
+
+    # ── Dashboard ─────────────────────────────────────────────────────────────
 
     def _show_dashboard(self, user: UserModel) -> None:
-        """Tạo mới DashboardScreen mỗi lần đăng nhập (user có thể khác)."""
-        # Xóa dashboard cũ nếu có
         if self._dashboard is not None:
             self._stack.removeWidget(self._dashboard)
             self._dashboard.deleteLater()
@@ -80,38 +128,30 @@ class MainWindow(QMainWindow):
         self._stack.addWidget(self._dashboard)
         self._stack.setCurrentWidget(self._dashboard)
 
-    # ── Handlers navigation ───────────────────────────────────────────────────
+    # ── Handlers ─────────────────────────────────────────────────────────────
 
     def _on_go_to_login(self) -> None:
-        """Welcome → Login."""
         self._show_login()
 
     def _on_back_to_welcome(self) -> None:
-        """Login → Welcome."""
         self._stack.setCurrentWidget(self._welcome)
 
     def _on_login_success(self, user: UserModel) -> None:
-        """Login → Dashboard."""
         self._show_dashboard(user)
 
     def _on_logout(self) -> None:
-        """Dashboard → Login (reset form)."""
         self._show_login()
 
     def _on_learn_more(self) -> None:
         QMessageBox.information(
-            self,
-            "Về SkillProof",
-            (
-                f"<b>{APP_NAME}</b><br><br>"
-                "Hệ thống quản lý và chứng nhận kỹ năng chuyên nghiệp.<br><br>"
-                "<b>Các tính năng chính:</b><br>"
-                "• Quản lý hồ sơ kỹ năng cá nhân<br>"
-                "• Đánh giá năng lực theo chuẩn<br>"
-                "• Cấp và xác thực chứng chỉ<br>"
-                "• Theo dõi lộ trình học tập<br>"
-                "• Quản lý khoá học và giảng viên"
-            ),
+            self, "Về SkillProof",
+            f"<b>{APP_NAME}</b><br><br>"
+            "Hệ thống quản lý và chứng nhận kỹ năng chuyên nghiệp.<br><br>"
+            "<b>Tính năng:</b><br>"
+            "• Quản lý hồ sơ kỹ năng<br>"
+            "• Đánh giá năng lực theo chuẩn<br>"
+            "• Cấp và xác thực chứng chỉ<br>"
+            "• Theo dõi lộ trình học tập",
         )
 
     # ── Đóng ứng dụng ────────────────────────────────────────────────────────

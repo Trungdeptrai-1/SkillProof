@@ -1,8 +1,8 @@
 # SkillProof — Tài liệu Kiến trúc
 
-> **Phiên bản:** 1.1.0 — Giai đoạn 01  
+> **Phiên bản:** 1.2.0 — Giai đoạn 01.1  
 > **Cập nhật:** 2026-11-08  
-> **Trạng thái:** Đăng nhập hoàn chỉnh, điều hướng theo role, sẵn sàng phát triển Dashboard nghiệp vụ
+> **Trạng thái:** Xác thực ổn định, PBKDF2 per-user salt, first-run setup, 133 tests PASS
 
 ---
 
@@ -26,45 +26,53 @@
 
 ```
 SkillProof_New/
-├── main.py                         # Điểm vào — khởi tạo logging, DB, Qt app
-├── requirements.txt                # PySide6==6.12.0 (UTF-8 no-BOM)
-├── README.md                       # Hướng dẫn cài đặt và sử dụng
-├── ARCHITECTURE.md                 # Tài liệu này
-├── git_setup.ps1                   # Script hỗ trợ Git
-├── .gitignore                      # Bảo vệ .venv, data/, .env, secrets
+├── main.py                         ✅ Điểm vào
+├── requirements.txt                ✅ PySide6 + pytest
+├── README.md                       ✅ Cập nhật Giai đoạn 01.1
+├── ARCHITECTURE.md                 ✅ Tài liệu này
+├── pytest.ini                      ✅ Cấu hình test suite
+├── git_setup.ps1                   (có thể xóa)
+├── .gitignore
 │
 ├── app/
 │   ├── database/
-│   │   ├── __init__.py             # Export: db, create_all_tables
-│   │   ├── connection.py           # Singleton DatabaseConnection
-│   │   └── schema.py               # DDL, Triggers, Seed, Migrations
-│   │
-│   ├── models/                     # ✅ Giai đoạn 01
 │   │   ├── __init__.py
-│   │   └── user_model.py           # UserModel DTO — dataclass, from_row()
+│   │   ├── connection.py           ✅ Singleton, WAL, FK ON
+│   │   └── schema.py               ✅ DDL + MIG-001/002/003, is_first_run()
 │   │
-│   ├── services/                   # ✅ Giai đoạn 01
+│   ├── models/
 │   │   ├── __init__.py
-│   │   └── auth_service.py         # AuthService, SessionManager, LoginResult
+│   │   └── user_model.py           ✅ UserModel DTO, không có field password
+│   │
+│   ├── services/
+│   │   ├── __init__.py
+│   │   └── auth_service.py         ✅ PBKDF2 verify, dummy hash, lazy rehash
 │   │
 │   ├── ui/
-│   │   ├── main_window.py          # QMainWindow + QStackedWidget navigation
-│   │   ├── screens/
-│   │   │   ├── welcome_screen.py   # Màn hình chào mừng ✅ Giai đoạn 00
-│   │   │   ├── login_screen.py     # Màn hình đăng nhập ✅ Giai đoạn 01
-│   │   │   └── dashboard_screen.py # Dashboard placeholder 6 roles ✅ Giai đoạn 01
-│   │   ├── components/             # Widget tái sử dụng (chưa triển khai)
-│   │   └── dialogs/                # Hộp thoại (chưa triển khai)
+│   │   ├── main_window.py          ✅ route_initial → FirstRun/Welcome
+│   │   └── screens/
+│   │       ├── welcome_screen.py   ✅ Màn hình chào mừng
+│   │       ├── login_screen.py     ✅ Đăng nhập
+│   │       ├── first_run_screen.py ✅ Thiết lập admin lần đầu (Giai đoạn 01.1)
+│   │       └── dashboard_screen.py ✅ Placeholder 6 roles
 │   │
 │   └── utils/
-│       ├── constants.py            # Hằng số: màu, font, kích thước, đường dẫn
-│       ├── styles.py               # QSS stylesheet tập trung
-│       └── helpers.py              # Hàm tiện ích: hash, validate, logging
+│       ├── constants.py            ✅ Design tokens
+│       ├── styles.py               ✅ QSS tập trung
+│       └── helpers.py              ✅ PBKDF2-SHA256, backward compat legacy
 │
-├── assets/icons/ & images/         # Tài nguyên tĩnh (chưa có file)
-└── data/                           # KHÔNG commit Git
+├── tests/                          ✅ 133 tests PASS (Giai đoạn 01.1)
+│   ├── conftest.py                 # Fixtures: fresh_db, legacy_db, auth, session_mgr
+│   ├── test_auth_service.py        # 40 tests: login, logout, session, roles, injection
+│   ├── test_migration.py           # 25 tests: MIG-001/002/003, rollback, FK
+│   ├── test_password_hashing.py    # 17 tests: PBKDF2, backward compat, timing
+│   ├── test_session.py             # 9 tests: SessionManager singleton, states
+│   └── test_regression_phase00_01.py # 42 tests: regression full stack
+│
+├── assets/icons/ & images/         (chưa có file)
+└── data/                           🔒 KHÔNG commit Git
     ├── skillproof.db
-    └── logs/skillproof_YYYYMMDD.log
+    └── logs/
 ```
 
 ---
@@ -378,23 +386,52 @@ except Exception as e:
 
 ## 8. Bảo mật
 
-### 8.1 Hash mật khẩu
+### 8.1 Password Hashing — PBKDF2-SHA256
 
-```python
-# utils/helpers.py
-salt = "skillproof_salt_2024"
-hash = SHA-256(salt + password)
+```
+Giai đoạn 01.1+:
+  Format: "pbkdf2:sha256:600000:<base64_salt>:<base64_hash>"
+  Salt: 32 bytes ngẫu nhiên per-user (os.urandom)
+  Iterations: 600,000 (OWASP 2023 minimum)
+  Output: 32 bytes (256 bits)
+
+Legacy (backward compat):
+  Format: hex string 64 ký tự = SHA-256("skillproof_salt_2024" + password)
+  verify_password() nhận biết tự động và verify đúng
+  needs_rehash() = True → lazy upgrade lên PBKDF2 khi login thành công
 ```
 
-> **Lưu ý production:** Nên thay bằng `bcrypt` hoặc `argon2-cffi` khi triển khai thực tế.
+### 8.2 Timing Attack Mitigation
 
-### 8.2 Không commit lên Git
+```python
+# auth_service.py — thứ tự cố định, không early return trước verify
+stored_hash = row["password"] if row else _DUMMY_HASH  # dummy nếu không tìm thấy
+pw_ok = verify_password(password, stored_hash)          # LUÔN chạy PBKDF2
+if row is None: return USER_NOT_FOUND                   # return SAU khi đã verify
+if not pw_ok:   return WRONG_PASSWORD
+if inactive:    return ACCOUNT_INACTIVE                 # check active CUỐI cùng
+```
+
+### 8.3 Thông báo lỗi — Không tiết lộ thông tin
+
+| Trường hợp | Thông báo hiển thị |
+|---|---|
+| Email không tồn tại | "Email hoặc mật khẩu không chính xác." |
+| Sai mật khẩu | "Email hoặc mật khẩu không chính xác." |
+| Tài khoản bị khoá | "Tài khoản đã bị vô hiệu hóa..." |
+
+### 8.4 Admin Setup — First-Run
+
+- **Không có admin hardcode** từ Giai đoạn 01.1.
+- Màn hình `FirstRunScreen` xuất hiện khi `setup_done != '1'`.
+- Admin tự nhập email + mật khẩu mạnh → hash PBKDF2 ngay lập tức.
+- `mark_setup_done()` ghi `setup_done=1` vào `app_settings`.
+
+### 8.5 Không commit lên Git
 
 - `data/` — database chứa mật khẩu hash
-- `.venv/` — môi trường ảo
-- `.env*` — biến môi trường
-- `secrets.*` — thông tin nhạy cảm
-- `data/logs/` — log có thể chứa thông tin người dùng
+- `.venv/`, `.env*`, `secrets.*`
+- `data/logs/`
 
 ---
 
@@ -423,22 +460,26 @@ create_all_tables()
 ## 10. Lộ trình phát triển
 
 ### Giai đoạn 00 — Nền tảng ✅ HOÀN THÀNH
-- [x] Cấu trúc thư mục chuyên nghiệp
-- [x] main.py, MainWindow, WelcomeScreen
+- [x] Cấu trúc thư mục, main.py, WelcomeScreen
 - [x] Database singleton, schema 7 bảng, WAL
 - [x] Design system: màu, font, stylesheet
-- [x] Helpers: hash, validate, logging
-- [x] Git init, .gitignore, README
+- [x] Helpers: validate, logging
 - [x] Sửa BUG-1 (role constraint), BUG-2 (admin hash)
 
 ### Giai đoạn 01 — Xác thực người dùng ✅ HOÀN THÀNH
-- [x] `app/models/user_model.py` — UserModel DTO, không lưu password
-- [x] `app/services/auth_service.py` — AuthService (8 trạng thái), SessionManager singleton
-- [x] `app/ui/screens/login_screen.py` — 2-panel, form, toggle password, fade-in
-- [x] `app/ui/screens/dashboard_screen.py` — placeholder đầy đủ 6 roles
-- [x] `app/ui/main_window.py` — navigation Welcome→Login→Dashboard→Logout
-- [x] Parameterized query — chống SQL Injection
-- [x] 29/29 tests PASS (syntax, import, auth, regression)
+- [x] UserModel DTO, AuthService, SessionManager
+- [x] LoginScreen 2-panel, toggle password
+- [x] DashboardScreen placeholder 6 roles
+- [x] Navigation Welcome→Login→Dashboard→Logout
+
+### Giai đoạn 01.1 — Ổn định xác thực ✅ HOÀN THÀNH
+- [x] PBKDF2-SHA256 600k, per-user salt (stdlib — không cần thư viện ngoài)
+- [x] Backward compat legacy hash, lazy rehash khi login
+- [x] Timing attack mitigation (dummy hash, verify trước is_active)
+- [x] First-Run Admin Setup — không hardcode mật khẩu
+- [x] MIG-003: vô hiệu hóa admin legacy, yêu cầu reset
+- [x] MIG-002 sửa: `conn.execute()` thay `executescript()`, row-count verify, rollback
+- [x] Test suite: 133 tests PASS (pytest 8.3.5)
 
 ### Giai đoạn 02 — Dashboard nghiệp vụ theo vai trò
 - [ ] AdminDashboard — quản lý users, skills, settings
@@ -458,63 +499,90 @@ create_all_tables()
 
 ---
 
-## 11. Vấn đề còn tồn tại (sau Giai đoạn 01)
+## 11. Vấn đề còn tồn tại (sau Giai đoạn 01.1)
 
 | #   | Mức độ  | Vấn đề                                              | Giai đoạn giải quyết |
 |-----|---------|-----------------------------------------------------|----------------------|
-| W-1 | Đã sửa  | imports thừa trong welcome_screen                   | ✅ Giai đoạn 00      |
-| W-2 | Thấp    | Callback plain attribute (LoginScreen dùng Signal)  | Hỗn hợp — OK        |
-| W-3 | Trung   | `tests/` chưa tạo thư mục chính thức với pytest     | Giai đoạn 02         |
-| W-4 | Đã giải | `models/` và `services/` — UserModel, AuthService   | ✅ Giai đoạn 01      |
-| W-5 | Thấp    | `git_setup.ps1` không cần sau khi Git ổn định       | Có thể xóa           |
-| W-6 | Thấp    | SHA-256 + salt cứng — dùng bcrypt cho production    | Giai đoạn production |
-| W-7 | Thấp    | `app_settings.setup_done` chưa sử dụng             | Giai đoạn 02         |
-| W-8 | Thấp    | DashboardScreen tạo mới mỗi login (bình thường)     | Chấp nhận được       |
-| W-9 | Thấp    | Không có icon file trong assets/                    | Giai đoạn 02         |
+| W-1 | Thấp    | Legacy hash vẫn hoạt động — lazy migrate khi login  | ✅ Tự động           |
+| W-2 | Trung   | Không có UI Reset Admin (cần xóa DB thủ công)       | Giai đoạn 02         |
+| W-3 | Thấp    | `git_setup.ps1` không cần sau khi Git ổn định       | Có thể xóa           |
+| W-4 | Thấp    | PBKDF2 272ms/login — OK desktop, cần test máy yếu   | Theo dõi             |
+| W-5 | Thấp    | Không có icon file trong `assets/`                  | Giai đoạn 02         |
 
 ---
 
-## 12. AuthService — Chi tiết kỹ thuật
+## 12. AuthService — Chi tiết kỹ thuật (Giai đoạn 01.1)
 
 ### 12.1 Luồng xác thực
 
 ```
 login(email, password)
-    │
-    ├── 1. Validate: email trống? → EMPTY_EMAIL
-    ├── 2. Validate: password trống? → EMPTY_PASSWORD
-    ├── 3. Validate: email format? → INVALID_EMAIL_FORMAT
-    ├── 4. DB query: SELECT ... WHERE email=? (parameterized)
-    │       └── DB error → DB_ERROR (không crash)
-    ├── 5. row is None → USER_NOT_FOUND
-    ├── 6. is_active=0 → ACCOUNT_INACTIVE
-    ├── 7. verify_password(plain, hash) → WRONG_PASSWORD
-    └── 8. SUCCESS → UserModel.from_row() → SessionManager.start_session()
+    ├── 1. email.strip() trống → EMPTY_EMAIL
+    ├── 2. password trống → EMPTY_PASSWORD
+    ├── 3. is_valid_email() → INVALID_EMAIL_FORMAT
+    ├── 4. DB SELECT WHERE email=? (parameterized)
+    │       └── sqlite3.Error → DB_ERROR
+    ├── 5. stored_hash = row["password"] IF row ELSE _DUMMY_HASH
+    ├── 6. pw_ok = verify_password(password, stored_hash)  ← PBKDF2, LUÔN chạy
+    ├── 7. row is None → USER_NOT_FOUND     (return SAU verify)
+    ├── 8. not pw_ok → WRONG_PASSWORD
+    ├── 9. not is_active → ACCOUNT_INACTIVE  (check CUỐI)
+    ├── 10. needs_rehash() → _rehash_password() (lazy migrate)
+    └── 11. SUCCESS → UserModel.from_row() → SessionManager.start_session()
 ```
 
-### 12.2 Bảo mật
+### 12.2 LoginResult status codes
 
-| Nguyên tắc | Cách thực hiện |
-|------------|----------------|
-| Không log password | Chỉ log user_id, không log plain/hash password |
-| Không lộ thông tin | USER_NOT_FOUND và WRONG_PASSWORD trả cùng message chung |
-| SQL Injection | Parameterized query `WHERE email = ?` |
-| Password field | UserModel.from_row() không bao gồm password |
-| Session | Xóa password khỏi QLineEdit ngay sau đăng nhập thành công |
-
-### 12.3 LoginResult status codes
-
-| Status | Ý nghĩa | Thông báo hiển thị |
-|--------|---------|-------------------|
-| `success` | Đăng nhập thành công | Chuyển màn hình |
-| `empty_email` | Email trống | "Vui lòng nhập địa chỉ email." |
-| `empty_password` | Password trống | "Vui lòng nhập mật khẩu." |
-| `invalid_email_format` | Email sai định dạng | "Địa chỉ email không đúng định dạng." |
-| `user_not_found` | Email không tồn tại | "Email hoặc mật khẩu không chính xác." |
-| `wrong_password` | Sai mật khẩu | "Email hoặc mật khẩu không chính xác." |
-| `account_inactive` | Tài khoản bị khoá | "Tài khoản đã bị vô hiệu hóa..." |
-| `db_error` | Lỗi DB | "Không thể kết nối cơ sở dữ liệu..." |
+| Status | Thông báo hiển thị |
+|--------|-------------------|
+| `success` | Chuyển màn hình |
+| `empty_email` | "Vui lòng nhập địa chỉ email." |
+| `empty_password` | "Vui lòng nhập mật khẩu." |
+| `invalid_email_format` | "Địa chỉ email không đúng định dạng." |
+| `user_not_found` | "Email hoặc mật khẩu không chính xác." |
+| `wrong_password` | "Email hoặc mật khẩu không chính xác." |
+| `account_inactive` | "Tài khoản đã bị vô hiệu hóa..." |
+| `db_error` | "Không thể kết nối cơ sở dữ liệu..." |
 
 ---
 
-*Tài liệu được cập nhật sau Giai đoạn 01 — SkillProof Authentication.*
+## 13. Đánh giá Roles — Báo cáo
+
+### 13.1 Roles trong database
+
+| Role | Mô tả | Trong 4 roles nghiệp vụ dự kiến |
+|------|-------|----------------------------------|
+| `admin` | Quản trị hệ thống | ✅ Có |
+| `instructor` | Giảng viên khoá học | ⚠️ Không có trong 4 roles chính |
+| `student` | Học viên khoá học | ⚠️ Không có trong 4 roles chính |
+| `candidate` | Ứng viên tìm việc | ✅ Có (default) |
+| `company` | Doanh nghiệp | ✅ Có |
+| `expert` | Chuyên gia đánh giá | ✅ Có |
+
+### 13.2 Phân tích instructor/student
+
+- Bảng `courses.instructor_id → users.id` tạo dependency thực giữa schema và role `instructor`.
+- Bảng `enrollments.user_id → users.id` phục vụ cả `student` lẫn `candidate`.
+- **Khuyến nghị:** Giữ nguyên, clarify với stakeholder trước Giai đoạn 02.
+- **Không xóa** — tránh FK violation và mất dữ liệu hiện có.
+
+---
+
+## 14. Test Suite
+
+```
+tests/ (133 tests, pytest 8.3.5)
+├── conftest.py                   fresh_db, legacy_db, auth, session_mgr fixtures
+├── test_auth_service.py          40 tests — login/logout/session/roles/injection/timing
+├── test_migration.py             25 tests — MIG-001/002/003, rollback, FK, idempotent
+├── test_password_hashing.py      17 tests — PBKDF2, backward compat, timing safety
+├── test_session.py                9 tests — Singleton, states, roles
+└── test_regression_phase00_01.py 42 tests — regression full stack phase 00+01
+```
+
+**Chạy:** `python -m pytest tests/ -v`  
+**DB test:** tmp_path fixture — KHÔNG đụng `data/skillproof.db` thật.
+
+---
+
+*Tài liệu được cập nhật sau Giai đoạn 01.1 — SkillProof Authentication Hardening.*

@@ -59,6 +59,22 @@ pip install -r requirements.txt
 python main.py
 ```
 
+**Lần đầu chạy:** Ứng dụng sẽ hiển thị màn hình **Thiết lập Admin** để tạo tài khoản quản trị viên.  
+Nhập họ tên, email và mật khẩu mạnh (≥8 ký tự, có chữ hoa và số).  
+Mật khẩu được mã hóa bằng **PBKDF2-SHA256** với salt ngẫu nhiên — không hardcode.
+
+---
+
+## Chạy kiểm thử
+
+```bash
+# Chạy toàn bộ test suite
+python -m pytest tests/ -v
+
+# Chạy nhanh không verbose
+python -m pytest tests/ -q
+```
+
 ---
 
 ## Cấu trúc dự án
@@ -102,13 +118,14 @@ SkillProof_New/
 
 ## Tài khoản mặc định (dev)
 
-| Trường     | Giá trị              |
-|------------|----------------------|
-| Username   | `admin`              |
-| Password   | `admin`              |
-| Role       | `admin`              |
+> ⚠️ **Giai đoạn 01.1+:** Không còn tài khoản admin hardcode.  
+> Lần đầu chạy ứng dụng, màn hình **First-Run Setup** sẽ yêu cầu tạo admin với mật khẩu mạnh.  
+> Mật khẩu được mã hóa PBKDF2-SHA256 (600,000 iterations, salt ngẫu nhiên).
 
-> ⚠️ Chỉ dùng cho môi trường phát triển. Đổi mật khẩu trước khi triển khai thực tế.
+**Nếu nâng cấp từ Giai đoạn 01 cũ** (có admin seed `admin/admin`):  
+- Admin cũ bị vô hiệu hóa tự động (MIG-003).  
+- Xóa `data/skillproof.db` và chạy lại để thiết lập admin mới.  
+- Hoặc dùng màn hình Reset Admin khi `setup_done=reset_required`.
 
 ---
 
@@ -131,8 +148,11 @@ SkillProof_New/
 - [x] Nền tảng ứng dụng (main.py, cấu trúc thư mục)
 - [x] Màn hình chào mừng
 - [x] Kết nối SQLite + Schema
-- [ ] Màn hình đăng nhập / đăng ký
-- [ ] Dashboard người dùng
+- [x] Màn hình đăng nhập / đăng xuất (Giai đoạn 01)
+- [x] First-Run Admin Setup — không hardcode mật khẩu (Giai đoạn 01.1)
+- [x] PBKDF2-SHA256 per-user salt, lazy migration hash cũ (Giai đoạn 01.1)
+- [x] Test suite tự động: 133 tests — auth, session, migration, regression (Giai đoạn 01.1)
+- [ ] Dashboard người dùng theo role
 - [ ] Quản lý kỹ năng
 - [ ] Quản lý chứng chỉ
 - [ ] Quản lý khoá học

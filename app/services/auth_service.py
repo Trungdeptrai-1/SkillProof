@@ -1,10 +1,14 @@
 """
 AuthService — Xác thực người dùng và quản lý phiên đăng nhập.
 
-Nguyên tắc:
-- Không lưu/log mật khẩu dạng plain text.
-- Dùng parameterized query — tránh SQL Injection.
-- Xử lý mọi ngoại lệ DB — ứng dụng không crash.
+Nguyên tắc bảo mật:
+- Không lưu/log mật khẩu dạng plain text ở bất kỳ đâu.
+- Parameterized query — tránh SQL Injection.
+- hmac.compare_digest trong verify_password — tránh timing attack.
+- verify_password luôn chạy kể cả khi user không tồn tại (dummy hash)
+  để tránh timing difference tiết lộ email có tồn tại hay không.
+- is_active check SAU verify_password để đồng đều thời gian phản hồi.
+- Lazy rehash: nâng cấp hash cũ (legacy SHA-256) → PBKDF2 ngay khi login thành công.
 - SessionManager lưu trạng thái trong bộ nhớ (in-process singleton).
 """
 
@@ -12,13 +16,22 @@ from __future__ import annotations
 
 import logging
 import sqlite3
-from typing import Tuple
 
 from app.database.connection import db
 from app.models.user_model import UserModel
-from app.utils.helpers import verify_password, is_valid_email
+from app.utils.helpers import (
+    verify_password, is_valid_email, hash_password, needs_rehash,
+)
 
 logger = logging.getLogger(__name__)
+
+# Dummy hash dùng để cân bằng thời gian khi email không tồn tại
+# Tránh timing attack phân biệt "email không tồn tại" vs "sai mật khẩu"
+_DUMMY_HASH = (
+    "pbkdf2:sha256:600000:"
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=:"
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -28,16 +41,17 @@ logger = logging.getLogger(__name__)
 class LoginResult:
     """Kết quả trả về từ AuthService.login()."""
 
-    SUCCESS             = "success"
-    EMPTY_EMAIL         = "empty_email"
-    EMPTY_PASSWORD      = "empty_password"
+    SUCCESS              = "success"
+    EMPTY_EMAIL          = "empty_email"
+    EMPTY_PASSWORD       = "empty_password"
     INVALID_EMAIL_FORMAT = "invalid_email_format"
-    USER_NOT_FOUND      = "user_not_found"
-    WRONG_PASSWORD      = "wrong_password"
-    ACCOUNT_INACTIVE    = "account_inactive"
-    DB_ERROR            = "db_error"
+    USER_NOT_FOUND       = "user_not_found"
+    WRONG_PASSWORD       = "wrong_password"
+    ACCOUNT_INACTIVE     = "account_inactive"
+    DB_ERROR             = "db_error"
 
-    # Thông báo lỗi thân thiện (không tiết lộ thông tin nội bộ)
+    # Thông báo thân thiện — USER_NOT_FOUND và WRONG_PASSWORD cùng thông báo
+    # để không tiết lộ email có tồn tại hay không
     MESSAGES: dict[str, str] = {
         SUCCESS:              "Đăng nhập thành công.",
         EMPTY_EMAIL:          "Vui lòng nhập địa chỉ email.",
@@ -51,7 +65,7 @@ class LoginResult:
 
     def __init__(self, status: str, user: UserModel | None = None) -> None:
         self.status  = status
-        self.user    = user           # Chỉ có giá trị khi status == SUCCESS
+        self.user    = user
         self.success = (status == self.SUCCESS)
         self.message = self.MESSAGES.get(status, "Đã xảy ra lỗi không xác định.")
 
@@ -60,14 +74,11 @@ class LoginResult:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# SessionManager — Singleton lưu trạng thái phiên trong bộ nhớ
+# SessionManager — Singleton in-memory
 # ══════════════════════════════════════════════════════════════════════════════
 
 class SessionManager:
-    """
-    Quản lý phiên đăng nhập trong bộ nhớ ứng dụng.
-    Singleton — dùng SessionManager.instance().
-    """
+    """Quản lý phiên đăng nhập trong bộ nhớ — Singleton."""
 
     _instance: "SessionManager | None" = None
 
@@ -77,11 +88,8 @@ class SessionManager:
             cls._instance._current_user: UserModel | None = None
         return cls._instance
 
-    # ── Truy cập ──────────────────────────────────────────────────────────────
-
     @property
     def current_user(self) -> UserModel | None:
-        """Trả về user hiện đang đăng nhập, hoặc None."""
         return self._current_user
 
     @property
@@ -90,123 +98,115 @@ class SessionManager:
 
     @property
     def role(self) -> str | None:
-        """Role của user hiện tại."""
         return self._current_user.role if self._current_user else None
 
-    # ── Thao tác ──────────────────────────────────────────────────────────────
-
     def start_session(self, user: UserModel) -> None:
-        """Lưu user vào session sau khi đăng nhập thành công."""
         self._current_user = user
-        logger.info(
-            "Session started: user_id=%d, role=%s",
-            user.id, user.role
-        )
+        logger.info("Session started: user_id=%d, role=%s", user.id, user.role)
 
     def end_session(self) -> None:
-        """Xóa session khi đăng xuất."""
         if self._current_user:
-            logger.info(
-                "Session ended: user_id=%d, role=%s",
-                self._current_user.id, self._current_user.role
-            )
+            logger.info("Session ended: user_id=%d", self._current_user.id)
         self._current_user = None
 
     @classmethod
     def instance(cls) -> "SessionManager":
-        """Truy cập singleton."""
         return cls()
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# AuthService — Logic xác thực
+# AuthService
 # ══════════════════════════════════════════════════════════════════════════════
 
 class AuthService:
     """
-    Xử lý đăng nhập: validate đầu vào → truy vấn DB → kiểm tra hash → tạo session.
-    Không có state — tất cả phương thức có thể gọi độc lập.
+    Logic xác thực theo thứ tự:
+    1. Validate đầu vào
+    2. Truy vấn DB (parameterized)
+    3. verify_password (LUÔN chạy — dummy hash nếu user không tồn tại)
+    4. Kiểm tra is_active (SAU verify để đồng đều thời gian)
+    5. Lazy rehash nếu hash cũ (legacy)
+    6. Tạo session
     """
 
     def login(self, email: str, password: str) -> LoginResult:
-        """
-        Xác thực email + password.
-
-        Thứ tự kiểm tra:
-        1. Validate đầu vào (trống, định dạng)
-        2. Truy vấn DB bằng parameterized query
-        3. Kiểm tra is_active
-        4. Verify password hash
-        5. Tạo session nếu thành công
-
-        Trả về LoginResult — không raise exception ra ngoài.
-        """
-        # 1. Validate đầu vào
-        email    = email.strip()
-        password = password  # Không strip — mật khẩu có thể có space hợp lệ
-
+        # ── 1. Validate ──────────────────────────────────────────────────────
+        email = email.strip()
         if not email:
             return LoginResult(LoginResult.EMPTY_EMAIL)
-
         if not password:
             return LoginResult(LoginResult.EMPTY_PASSWORD)
-
         if not is_valid_email(email):
             return LoginResult(LoginResult.INVALID_EMAIL_FORMAT)
 
-        # 2. Truy vấn DB — parameterized query, tránh SQL Injection
+        # ── 2. Truy vấn DB ───────────────────────────────────────────────────
         try:
             row = db.fetchone(
                 """
                 SELECT id, username, email, password, full_name,
                        role, avatar_path, is_active, created_at, updated_at
-                FROM users
-                WHERE email = ?
+                FROM users WHERE email = ?
                 """,
                 (email,),
             )
         except sqlite3.Error as exc:
-            logger.error("DB error during login query: %s", exc)
+            logger.error("DB error during login: %s", exc)
             return LoginResult(LoginResult.DB_ERROR)
         except Exception as exc:
-            logger.exception("Unexpected error during login: %s", exc)
+            logger.exception("Unexpected login error: %s", exc)
             return LoginResult(LoginResult.DB_ERROR)
 
-        # 3. Không tìm thấy user
+        # ── 3. verify_password — LUÔN chạy (dummy nếu không tìm thấy) ───────
+        #    Đảm bảo thời gian phản hồi đồng đều, không tiết lộ email tồn tại.
+        stored_hash  = row["password"] if row is not None else _DUMMY_HASH
+        pw_ok        = verify_password(password, stored_hash)
+
+        # ── 4. Xác định kết quả theo thứ tự ưu tiên ─────────────────────────
         if row is None:
-            # Log cảnh báo không tiết lộ chi tiết ra ngoài
-            logger.warning("Login attempt: email not found (masked for security)")
+            # Verify đã chạy xong (constant time), giờ mới return
+            logger.warning("Login: email not found (masked)")
             return LoginResult(LoginResult.USER_NOT_FOUND)
 
-        # 4. Kiểm tra tài khoản active TRƯỚC khi verify password
-        #    (tránh timing attack tiết lộ tài khoản có tồn tại hay không)
-        if not bool(row["is_active"]):
-            logger.warning(
-                "Login attempt on inactive account: user_id=%d", row["id"]
-            )
-            return LoginResult(LoginResult.ACCOUNT_INACTIVE)
-
-        # 5. Verify password — KHÔNG log plain password
-        stored_hash = row["password"]
-        if not verify_password(password, stored_hash):
-            logger.warning(
-                "Login attempt: wrong password for user_id=%d", row["id"]
-            )
+        if not pw_ok:
+            logger.warning("Login: wrong password for user_id=%d", row["id"])
             return LoginResult(LoginResult.WRONG_PASSWORD)
 
-        # 6. Thành công — tạo UserModel (không có password)
+        # is_active check SAU verify — nhất quán thời gian
+        if not bool(row["is_active"]):
+            logger.warning("Login: inactive account user_id=%d", row["id"])
+            return LoginResult(LoginResult.ACCOUNT_INACTIVE)
+
+        # ── 5. Lazy rehash — nâng cấp hash cũ lên PBKDF2 ────────────────────
+        if needs_rehash(stored_hash):
+            self._rehash_password(row["id"], password)
+
+        # ── 6. Tạo session ───────────────────────────────────────────────────
         user = UserModel.from_row(row)
         SessionManager.instance().start_session(user)
-        logger.info(
-            "Login successful: user_id=%d, role=%s", user.id, user.role
-        )
+        logger.info("Login successful: user_id=%d, role=%s", user.id, user.role)
         return LoginResult(LoginResult.SUCCESS, user=user)
 
     def logout(self) -> None:
         """Kết thúc phiên hiện tại."""
         SessionManager.instance().end_session()
 
+    def _rehash_password(self, user_id: int, plain_password: str) -> None:
+        """
+        Nâng cấp hash cũ (legacy SHA-256) lên PBKDF2-SHA256.
+        Gọi sau khi verify thành công — không bao giờ log plain_password.
+        """
+        try:
+            new_hash = hash_password(plain_password)
+            db.execute(
+                "UPDATE users SET password = ? WHERE id = ?",
+                (new_hash, user_id),
+            )
+            logger.info("Password rehashed for user_id=%d (legacy→PBKDF2)", user_id)
+        except Exception as exc:
+            # Không crash login nếu rehash thất bại — chỉ log warning
+            logger.warning("Rehash failed for user_id=%d: %s", user_id, exc)
 
-# ── Singleton shortcut ────────────────────────────────────────────────────────
+
+# ── Singleton shortcuts ───────────────────────────────────────────────────────
 auth_service = AuthService()
 session      = SessionManager.instance()
