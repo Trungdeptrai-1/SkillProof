@@ -12,6 +12,7 @@ from app.ui.screens.login_screen      import LoginScreen
 from app.ui.screens.register_screen   import RegisterScreen
 from app.ui.screens.dashboard_screen  import DashboardScreen
 from app.ui.screens.first_run_screen  import FirstRunScreen
+from app.ui.screens.company_profile_screen import CompanyProfileScreen
 from app.models.user_model            import UserModel
 from app.utils.constants import (
     APP_NAME,
@@ -28,6 +29,7 @@ class MainWindow(QMainWindow):
         self._dashboard: DashboardScreen | None = None
         self._first_run: FirstRunScreen | None  = None
         self._register:  RegisterScreen | None  = None
+        self._company_profile: CompanyProfileScreen | None = None
         self._setup_window()
         self._setup_central_widget()
         self._route_initial()
@@ -127,6 +129,32 @@ class MainWindow(QMainWindow):
         self._dashboard.on_logout = self._on_logout
         self._stack.addWidget(self._dashboard)
         self._stack.setCurrentWidget(self._dashboard)
+
+    # ── Company Profile ───────────────────────────────────────────────────────
+
+    def _show_company_profile(self) -> None:
+        """Hiển thị màn hình hồ sơ doanh nghiệp (chỉ role='company')."""
+        from app.services.auth_service import SessionManager
+        session = SessionManager.instance()
+        if not session.is_logged_in or session.current_user is None:
+            return
+        if session.current_user.role != "company":
+            return  # Không hiển thị cho role khác
+
+        if self._company_profile is not None:
+            self._stack.removeWidget(self._company_profile)
+            self._company_profile.deleteLater()
+            self._company_profile = None
+
+        self._company_profile = CompanyProfileScreen()
+        self._company_profile.on_back = self._on_company_profile_back
+        self._stack.addWidget(self._company_profile)
+        self._stack.setCurrentWidget(self._company_profile)
+
+    def _on_company_profile_back(self) -> None:
+        """Company Profile → Dashboard."""
+        if self._dashboard is not None:
+            self._stack.setCurrentWidget(self._dashboard)
 
     # ── Handlers ─────────────────────────────────────────────────────────────
 
