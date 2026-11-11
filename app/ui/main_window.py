@@ -14,6 +14,7 @@ from app.ui.screens.dashboard_screen  import DashboardScreen
 from app.ui.screens.first_run_screen  import FirstRunScreen
 from app.ui.screens.company_profile_screen import CompanyProfileScreen
 from app.ui.screens.candidate_profile_screen import CandidateProfileScreen
+from app.ui.screens.expert_profile_screen import ExpertProfileScreen
 from app.models.user_model            import UserModel
 from app.utils.constants import (
     APP_NAME,
@@ -32,6 +33,7 @@ class MainWindow(QMainWindow):
         self._register:  RegisterScreen | None  = None
         self._company_profile: CompanyProfileScreen | None = None
         self._candidate_profile: CandidateProfileScreen | None = None
+        self._expert_profile: ExpertProfileScreen | None = None
         self._setup_window()
         self._setup_central_widget()
         self._route_initial()
@@ -181,6 +183,32 @@ class MainWindow(QMainWindow):
 
     def _on_candidate_profile_back(self) -> None:
         """Candidate Profile → Dashboard."""
+        if self._dashboard is not None:
+            self._stack.setCurrentWidget(self._dashboard)
+
+    # ── Expert Profile ────────────────────────────────────────────────────────
+
+    def _show_expert_profile(self) -> None:
+        """Hiển thị màn hình hồ sơ chuyên gia (chỉ role='expert')."""
+        from app.services.auth_service import SessionManager
+        session = SessionManager.instance()
+        if not session.is_logged_in or session.current_user is None:
+            return
+        if session.current_user.role != "expert":
+            return
+
+        if self._expert_profile is not None:
+            self._stack.removeWidget(self._expert_profile)
+            self._expert_profile.deleteLater()
+            self._expert_profile = None
+
+        self._expert_profile = ExpertProfileScreen()
+        self._expert_profile.on_back = self._on_expert_profile_back
+        self._stack.addWidget(self._expert_profile)
+        self._stack.setCurrentWidget(self._expert_profile)
+
+    def _on_expert_profile_back(self) -> None:
+        """Expert Profile → Dashboard."""
         if self._dashboard is not None:
             self._stack.setCurrentWidget(self._dashboard)
 
