@@ -13,6 +13,7 @@ from app.ui.screens.register_screen   import RegisterScreen
 from app.ui.screens.dashboard_screen  import DashboardScreen
 from app.ui.screens.first_run_screen  import FirstRunScreen
 from app.ui.screens.company_profile_screen import CompanyProfileScreen
+from app.ui.screens.candidate_profile_screen import CandidateProfileScreen
 from app.models.user_model            import UserModel
 from app.utils.constants import (
     APP_NAME,
@@ -30,6 +31,7 @@ class MainWindow(QMainWindow):
         self._first_run: FirstRunScreen | None  = None
         self._register:  RegisterScreen | None  = None
         self._company_profile: CompanyProfileScreen | None = None
+        self._candidate_profile: CandidateProfileScreen | None = None
         self._setup_window()
         self._setup_central_widget()
         self._route_initial()
@@ -153,6 +155,32 @@ class MainWindow(QMainWindow):
 
     def _on_company_profile_back(self) -> None:
         """Company Profile → Dashboard."""
+        if self._dashboard is not None:
+            self._stack.setCurrentWidget(self._dashboard)
+
+    # ── Candidate Profile ──────────────────────────────────────────────────────
+
+    def _show_candidate_profile(self) -> None:
+        """Hiển thị màn hình hồ sơ ứng viên (chỉ role='candidate')."""
+        from app.services.auth_service import SessionManager
+        session = SessionManager.instance()
+        if not session.is_logged_in or session.current_user is None:
+            return
+        if session.current_user.role != "candidate":
+            return
+
+        if self._candidate_profile is not None:
+            self._stack.removeWidget(self._candidate_profile)
+            self._candidate_profile.deleteLater()
+            self._candidate_profile = None
+
+        self._candidate_profile = CandidateProfileScreen()
+        self._candidate_profile.on_back = self._on_candidate_profile_back
+        self._stack.addWidget(self._candidate_profile)
+        self._stack.setCurrentWidget(self._candidate_profile)
+
+    def _on_candidate_profile_back(self) -> None:
+        """Candidate Profile → Dashboard."""
         if self._dashboard is not None:
             self._stack.setCurrentWidget(self._dashboard)
 
