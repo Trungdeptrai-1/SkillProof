@@ -142,6 +142,7 @@ def _apply_migrations(conn: sqlite3.Connection) -> None:
     _mig_002_fix_role_constraint(conn)
     _mig_003_remove_hardcoded_admin(conn)
     _mig_004_create_business_tables(conn)
+    _mig_005_extend_contracts_and_softdelete(conn)
 
 
 # ── MIG-001 ───────────────────────────────────────────────────────────────────
@@ -184,14 +185,17 @@ def _mig_002_fix_role_constraint(conn: sqlite3.Connection) -> None:
         return
 
     current_ddl = ddl_row["sql"] or ""
-    old_check   = "'admin','instructor','student'"
-    new_check   = "'admin','instructor','student','candidate','company','expert'"
-
-    if new_check in current_ddl:
+    # Normalize whitespace để so sánh constraint string an toàn
+    import re as _re
+    _ddl_norm = _re.sub(r'\s+', '', current_ddl)   # bỏ toàn bộ whitespace
+    old_check  = "'admin','instructor','student'"
+    new_check  = "'admin','instructor','student','candidate','company','expert'"
+    # So sánh trên DDL đã normalize (không có whitespace)
+    if new_check in _ddl_norm:
         logger.debug("MIG-002: role constraint đã đúng, bỏ qua.")
         return
 
-    if old_check not in current_ddl:
+    if old_check not in _ddl_norm:
         logger.debug("MIG-002: không nhận dạng được constraint cũ, bỏ qua.")
         return
 
@@ -696,6 +700,199 @@ def _mig_004_create_business_tables(conn: sqlite3.Connection) -> None:
         conn.commit()
         logger.exception("MIG-004 FAILED, rolled back %d tables: %s",
                          len(created_tables), exc)
+        raise
+
+
+def _mig_005_extend_contracts_and_softdelete(conn: sqlite3.Connection) -> None:
+    """
+    MIG-005: Mở rộng company_expert_contracts và users cho Giai đoạn 04.4.
+
+    Thay đổi:
+    A. users: thêm cột is_deleted (soft-delete, không CASCADE xóa lịch sử).
+    B. company_expert_contracts: recreate với CHECK mở rộng thêm
+       'pending_expert' và 'rejected', cộng 2 cột lý do.
+
+    Bảo toàn:
+    - Mọi hàng contracts hiện có (status cũ) vẫn hợp lệ.
+    - Dữ liệu users không mất.
+    - Idempotent: chạy nhiều lần không lỗi.
+    """
+    # ── Phần A: Thêm is_deleted vào users ────────────────────────────────────
+    # Kiểm tra cột đã tồn tại chưa
+    user_cols = {r[1] for r in conn.execute("PRAGMA table_info(users)").fetchall()}
+    if "is_deleted" not in user_cols:
+        conn.execute(
+            "ALTER TABLE users ADD COLUMN is_deleted INTEGER NOT NULL DEFAULT 0"
+        )
+        conn.commit()
+        logger.info("MIG-005A: Thêm cột is_deleted vào users.")
+    else:
+        logger.debug("MIG-005A: is_deleted đã có, bỏ qua.")
+
+    # Thêm index nếu chưa có
+    idx_exists = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='index' AND name='idx_users_is_deleted'"
+    ).fetchone()
+    if not idx_exists:
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_users_is_deleted ON users(is_deleted)"
+        )
+        conn.commit()
+
+    # ── Phần B: Recreate company_expert_contracts với CHECK mở rộng ───────────
+    ddl_row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='company_expert_contracts'"
+    ).fetchone()
+    if not ddl_row:
+        logger.debug("MIG-005B: company_expert_contracts chưa tồn tại, bỏ qua.")
+        return
+
+    current_ddl = ddl_row["sql"] or ""
+    # Nếu đã có pending_expert trong DDL → đã migrate
+    if "pending_expert" in current_ddl:
+        logger.debug("MIG-005B: contracts đã có pending_expert, bỏ qua.")
+        return
+
+    logger.info("MIG-005B: Bắt đầu recreate company_expert_contracts...")
+    count_before = conn.execute(
+        "SELECT COUNT(*) FROM company_expert_contracts"
+    ).fetchone()[0]
+
+    try:
+        conn.execute("PRAGMA foreign_keys = OFF")
+
+        # Kiểm tra backup cũ từ migration thất bại trước (nếu có)
+        backup_exists = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+            " AND name='_contracts_mig005_backup'"
+        ).fetchone()
+        if backup_exists:
+            conn.execute("DROP TABLE _contracts_mig005_backup")
+            conn.commit()
+
+        conn.execute(
+            "ALTER TABLE company_expert_contracts RENAME TO _contracts_mig005_backup"
+        )
+
+        conn.execute("""
+            CREATE TABLE company_expert_contracts (
+                id                INTEGER PRIMARY KEY AUTOINCREMENT,
+                company_id        INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                expert_id         INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                contract_code     TEXT    NOT NULL UNIQUE,
+                status            TEXT    NOT NULL DEFAULT 'pending_expert'
+                                  CHECK(status IN (
+                                      'pending_expert',
+                                      'rejected',
+                                      'active',
+                                      'completed',
+                                      'terminated',
+                                      'cancelled'
+                                  )),
+                start_date        TEXT    NOT NULL DEFAULT (datetime('now','localtime')),
+                end_date          TEXT,
+                notes             TEXT,
+                rejection_reason  TEXT,
+                terminated_reason TEXT,
+                created_at        TEXT    NOT NULL DEFAULT (datetime('now','localtime'))
+            )
+        """)
+
+        # Copy dữ liệu cũ; 2 cột mới có giá trị NULL (không vi phạm)
+        conn.execute("""
+            INSERT INTO company_expert_contracts
+                (id, company_id, expert_id, contract_code, status,
+                 start_date, end_date, notes, created_at)
+            SELECT
+                id, company_id, expert_id, contract_code, status,
+                start_date, end_date, notes, created_at
+            FROM _contracts_mig005_backup
+        """)
+        conn.commit()
+
+        count_after = conn.execute(
+            "SELECT COUNT(*) FROM company_expert_contracts"
+        ).fetchone()[0]
+
+        if count_after != count_before:
+            # Rollback
+            conn.execute("DROP TABLE IF EXISTS company_expert_contracts")
+            conn.execute(
+                "ALTER TABLE _contracts_mig005_backup RENAME TO company_expert_contracts"
+            )
+            conn.commit()
+            conn.execute("PRAGMA foreign_keys = ON")
+            logger.error(
+                "MIG-005B ROLLBACK: row count mismatch (%d → %d)",
+                count_before, count_after,
+            )
+            return
+
+        conn.execute("DROP TABLE _contracts_mig005_backup")
+
+        # Recreate tasks để fix FK reference từ _contracts_mig005_backup → company_expert_contracts
+        # SQLite quirk: sau RENAME+DROP+CREATE, FK của bảng khác vẫn trỏ tên cũ
+        tasks_exists = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='tasks'"
+        ).fetchone()
+        if tasks_exists:
+            conn.execute("ALTER TABLE tasks RENAME TO _tasks_mig005_backup")
+            conn.execute("""
+                CREATE TABLE tasks (
+                    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                    company_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    expert_id       INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    contract_id     INTEGER REFERENCES company_expert_contracts(id) ON DELETE SET NULL,
+                    title           TEXT    NOT NULL,
+                    description     TEXT,
+                    task_type       TEXT    NOT NULL
+                                    CHECK(task_type IN ('grading','interview','question_creation','review')),
+                    status          TEXT    NOT NULL DEFAULT 'pending'
+                                    CHECK(status IN ('pending','in_progress','completed','cancelled')),
+                    priority        TEXT    NOT NULL DEFAULT 'normal'
+                                    CHECK(priority IN ('low','normal','high','urgent')),
+                    assigned_at     TEXT    NOT NULL DEFAULT (datetime('now','localtime')),
+                    due_at          TEXT,
+                    completed_at    TEXT,
+                    exam_session_id INTEGER REFERENCES exam_sessions(id) ON DELETE SET NULL,
+                    interview_id    INTEGER REFERENCES interviews(id) ON DELETE SET NULL
+                )
+            """)
+            conn.execute("INSERT INTO tasks SELECT * FROM _tasks_mig005_backup")
+            conn.execute("DROP TABLE _tasks_mig005_backup")
+            for idx_sql in [
+                "CREATE INDEX IF NOT EXISTS idx_tasks_company ON tasks(company_id)",
+                "CREATE INDEX IF NOT EXISTS idx_tasks_expert  ON tasks(expert_id)",
+                "CREATE INDEX IF NOT EXISTS idx_tasks_status  ON tasks(status)",
+                "CREATE INDEX IF NOT EXISTS idx_tasks_type    ON tasks(task_type)",
+            ]:
+                conn.execute(idx_sql)
+        conn.commit()
+
+        # Recreate indexes for contracts
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_contracts_company "
+            "ON company_expert_contracts(company_id)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_contracts_expert "
+            "ON company_expert_contracts(expert_id)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_contracts_status "
+            "ON company_expert_contracts(status)"
+        )
+        conn.commit()
+        conn.execute("PRAGMA foreign_keys = ON")
+
+        logger.info(
+            "MIG-005B: company_expert_contracts recreated OK (%d rows).",
+            count_after,
+        )
+
+    except Exception as exc:
+        conn.execute("PRAGMA foreign_keys = ON")
+        logger.exception("MIG-005B FAILED: %s", exc)
         raise
 
 
