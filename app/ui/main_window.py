@@ -15,6 +15,9 @@ from app.ui.screens.first_run_screen  import FirstRunScreen
 from app.ui.screens.company_profile_screen import CompanyProfileScreen
 from app.ui.screens.candidate_profile_screen import CandidateProfileScreen
 from app.ui.screens.expert_profile_screen import ExpertProfileScreen
+from app.ui.screens.expert_search_screen import ExpertSearchScreen
+from app.ui.screens.contract_management_screen import ContractManagementScreen
+from app.ui.screens.task_management_screen import TaskManagementScreen
 from app.models.user_model            import UserModel
 from app.utils.constants import (
     APP_NAME,
@@ -34,6 +37,9 @@ class MainWindow(QMainWindow):
         self._company_profile: CompanyProfileScreen | None = None
         self._candidate_profile: CandidateProfileScreen | None = None
         self._expert_profile: ExpertProfileScreen | None = None
+        self._expert_search: ExpertSearchScreen | None = None
+        self._contracts: ContractManagementScreen | None = None
+        self._tasks: TaskManagementScreen | None = None
         self._setup_window()
         self._setup_central_widget()
         self._route_initial()
@@ -209,6 +215,84 @@ class MainWindow(QMainWindow):
 
     def _on_expert_profile_back(self) -> None:
         """Expert Profile → Dashboard."""
+        if self._dashboard is not None:
+            self._stack.setCurrentWidget(self._dashboard)
+
+    # ── Expert Search ─────────────────────────────────────────────────────────
+
+    def _show_expert_search(self) -> None:
+        """Hiển thị màn hình tìm kiếm chuyên gia (chỉ role='company')."""
+        from app.services.auth_service import SessionManager
+        session = SessionManager.instance()
+        if not session.is_logged_in or session.current_user is None:
+            return
+        if session.current_user.role != "company":
+            return
+
+        if self._expert_search is not None:
+            self._stack.removeWidget(self._expert_search)
+            self._expert_search.deleteLater()
+            self._expert_search = None
+
+        self._expert_search = ExpertSearchScreen()
+        self._expert_search.on_back = self._on_expert_search_back
+        self._stack.addWidget(self._expert_search)
+        self._stack.setCurrentWidget(self._expert_search)
+
+    def _on_expert_search_back(self) -> None:
+        """Expert Search → Dashboard."""
+        if self._dashboard is not None:
+            self._stack.setCurrentWidget(self._dashboard)
+
+    # ── Contract Management ───────────────────────────────────────────────────
+
+    def _show_contracts(self) -> None:
+        """Hiển thị màn hình quản lý hợp đồng (company hoặc expert)."""
+        from app.services.auth_service import SessionManager
+        session = SessionManager.instance()
+        if not session.is_logged_in or session.current_user is None:
+            return
+        if session.current_user.role not in ("company", "expert"):
+            return
+
+        if self._contracts is not None:
+            self._stack.removeWidget(self._contracts)
+            self._contracts.deleteLater()
+            self._contracts = None
+
+        self._contracts = ContractManagementScreen()
+        self._contracts.on_back = self._on_contracts_back
+        self._stack.addWidget(self._contracts)
+        self._stack.setCurrentWidget(self._contracts)
+
+    def _on_contracts_back(self) -> None:
+        """Contract Management → Dashboard."""
+        if self._dashboard is not None:
+            self._stack.setCurrentWidget(self._dashboard)
+
+    # ── Task Management ───────────────────────────────────────────────────────
+
+    def _show_tasks(self) -> None:
+        """Hiển thị màn hình quản lý nhiệm vụ (company hoặc expert)."""
+        from app.services.auth_service import SessionManager
+        session = SessionManager.instance()
+        if not session.is_logged_in or session.current_user is None:
+            return
+        if session.current_user.role not in ("company", "expert"):
+            return
+
+        if self._tasks is not None:
+            self._stack.removeWidget(self._tasks)
+            self._tasks.deleteLater()
+            self._tasks = None
+
+        self._tasks = TaskManagementScreen()
+        self._tasks.on_back = self._on_tasks_back
+        self._stack.addWidget(self._tasks)
+        self._stack.setCurrentWidget(self._tasks)
+
+    def _on_tasks_back(self) -> None:
+        """Task Management → Dashboard."""
         if self._dashboard is not None:
             self._stack.setCurrentWidget(self._dashboard)
 
