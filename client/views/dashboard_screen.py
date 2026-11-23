@@ -66,6 +66,7 @@ ROLE_CONFIG: dict[str, dict] = {
             ("🏅", "Kỹ năng của tôi",       "Danh sách và mức độ thành thạo"),
             ("📜", "Chứng chỉ",             "Chứng nhận kỹ năng đã đạt được"),
             ("🔎", "Khám phá cơ hội",       "Tìm kiếm vị trí phù hợp năng lực"),
+            ("📝", "Lời mời làm bài",       "Nhận lời mời, làm bài thi và xem kết quả"),
         ],
         "accent": "#2E7D32",
     },
@@ -77,6 +78,7 @@ ROLE_CONFIG: dict[str, dict] = {
             ("📋", "Hợp đồng của tôi",       "Theo dõi hợp đồng với chuyên gia"),
             ("🎯", "Nhiệm vụ của tôi",       "Tạo và theo dõi nhiệm vụ"),
             ("🏢", "Hồ sơ doanh nghiệp",     "Cập nhật thông tin doanh nghiệp"),
+            ("🧑‍💼", "Tuyển dụng & đánh giá", "Vị trí, bài thi, lời mời và kết quả"),
         ],
         "accent": "#4527A0",
     },
@@ -112,6 +114,8 @@ class _Sidebar(QWidget):
         self._on_open_expert_search_cb = None
         self._on_open_contracts_cb = None
         self._on_open_tasks_cb = None
+        self._on_open_company_recruitment_cb = None
+        self._on_open_candidate_assessments_cb = None
         self._setup_ui()
 
     def paintEvent(self, event):  # noqa: N802
@@ -193,8 +197,12 @@ class _Sidebar(QWidget):
             btn = self._make_menu_item(icon, label)
             if self._user.role == "candidate" and label == "Hồ sơ cá nhân":
                 btn.clicked.connect(self._handle_open_candidate_profile)
+            elif self._user.role == "candidate" and label == "Lời mời làm bài":
+                btn.clicked.connect(self._handle_open_candidate_assessments)
             elif self._user.role == "company" and label == "Hồ sơ doanh nghiệp":
                 btn.clicked.connect(self._handle_open_company_profile)
+            elif self._user.role == "company" and label == "Tuyển dụng & đánh giá":
+                btn.clicked.connect(self._handle_open_company_recruitment)
             elif self._user.role == "company" and label == "Tìm chuyên gia":
                 btn.clicked.connect(self._handle_open_expert_search)
             elif self._user.role in ("company", "expert") and label == "Hợp đồng của tôi":
@@ -342,6 +350,30 @@ class _Sidebar(QWidget):
     def _handle_open_tasks(self) -> None:
         if callable(self._on_open_tasks_cb):
             self._on_open_tasks_cb()
+
+    @property
+    def on_open_company_recruitment(self):
+        return self._on_open_company_recruitment_cb
+
+    @on_open_company_recruitment.setter
+    def on_open_company_recruitment(self, cb):
+        self._on_open_company_recruitment_cb = cb
+
+    def _handle_open_company_recruitment(self) -> None:
+        if callable(self._on_open_company_recruitment_cb):
+            self._on_open_company_recruitment_cb()
+
+    @property
+    def on_open_candidate_assessments(self):
+        return self._on_open_candidate_assessments_cb
+
+    @on_open_candidate_assessments.setter
+    def on_open_candidate_assessments(self, cb):
+        self._on_open_candidate_assessments_cb = cb
+
+    def _handle_open_candidate_assessments(self) -> None:
+        if callable(self._on_open_candidate_assessments_cb):
+            self._on_open_candidate_assessments_cb()
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -550,6 +582,8 @@ class DashboardScreen(QWidget):
         self._on_open_expert_search_cb = None
         self._on_open_contracts_cb = None
         self._on_open_tasks_cb = None
+        self._on_open_company_recruitment_cb = None
+        self._on_open_candidate_assessments_cb = None
         self._setup_ui()
         QTimer.singleShot(80, self._animate_in)
 
@@ -621,6 +655,26 @@ class DashboardScreen(QWidget):
         if self._sidebar:
             self._sidebar.on_open_tasks = cb
 
+    @property
+    def on_open_company_recruitment(self):
+        return self._on_open_company_recruitment_cb
+
+    @on_open_company_recruitment.setter
+    def on_open_company_recruitment(self, cb):
+        self._on_open_company_recruitment_cb = cb
+        if self._sidebar:
+            self._sidebar.on_open_company_recruitment = cb
+
+    @property
+    def on_open_candidate_assessments(self):
+        return self._on_open_candidate_assessments_cb
+
+    @on_open_candidate_assessments.setter
+    def on_open_candidate_assessments(self, cb):
+        self._on_open_candidate_assessments_cb = cb
+        if self._sidebar:
+            self._sidebar.on_open_candidate_assessments = cb
+
     def _setup_ui(self) -> None:
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -634,6 +688,8 @@ class DashboardScreen(QWidget):
         self._sidebar.on_open_expert_search = self._handle_open_expert_search
         self._sidebar.on_open_contracts = self._handle_open_contracts
         self._sidebar.on_open_tasks = self._handle_open_tasks
+        self._sidebar.on_open_company_recruitment = self._handle_open_company_recruitment
+        self._sidebar.on_open_candidate_assessments = self._handle_open_candidate_assessments
 
         self._content = _ContentArea(self._user)
 
@@ -679,3 +735,11 @@ class DashboardScreen(QWidget):
     def _handle_open_tasks(self) -> None:
         if callable(self._on_open_tasks_cb):
             self._on_open_tasks_cb()
+
+    def _handle_open_company_recruitment(self) -> None:
+        if callable(self._on_open_company_recruitment_cb):
+            self._on_open_company_recruitment_cb()
+
+    def _handle_open_candidate_assessments(self) -> None:
+        if callable(self._on_open_candidate_assessments_cb):
+            self._on_open_candidate_assessments_cb()
