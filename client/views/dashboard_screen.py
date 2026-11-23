@@ -1,8 +1,4 @@
-"""
-DashboardScreen — Màn hình placeholder sau đăng nhập.
-Hiển thị thông tin user và role, chờ triển khai nghiệp vụ ở giai đoạn sau.
-Hỗ trợ đầy đủ 6 roles: admin, instructor, student, candidate, company, expert.
-"""
+"""Role-specific dashboards for authenticated non-admin users."""
 
 from __future__ import annotations
 
@@ -26,7 +22,7 @@ from app.models.user_model import UserModel, ROLE_LABELS, ROLE_ICONS
 from server.controllers.auth_controller import auth_controller
 
 
-# ── Cấu hình màn hình placeholder theo role ───────────────────────────────────
+# ── Cấu hình dashboard theo role ──────────────────────────────────────────────
 
 ROLE_CONFIG: dict[str, dict] = {
     "admin": {
@@ -77,10 +73,10 @@ ROLE_CONFIG: dict[str, dict] = {
         "title":       "Cổng doanh nghiệp",
         "description": "Tìm kiếm và xác minh ứng viên dựa trên kỹ năng chứng nhận.",
         "features": [
-            ("🏢", "Hồ sơ doanh nghiệp",   "Cập nhật thông tin doanh nghiệp"),
-            ("✅", "Xác minh chứng chỉ",    "Kiểm tra tính xác thực chứng chỉ"),
-            ("📢", "Đăng tin tuyển dụng",   "Đăng nhu cầu tuyển dụng"),
-            ("📊", "Báo cáo nhân sự",       "Phân tích thị trường kỹ năng"),
+            ("🔎", "Tìm chuyên gia",         "Tìm kiếm và gửi lời mời hợp tác"),
+            ("📋", "Hợp đồng của tôi",       "Theo dõi hợp đồng với chuyên gia"),
+            ("🎯", "Nhiệm vụ của tôi",       "Tạo và theo dõi nhiệm vụ"),
+            ("🏢", "Hồ sơ doanh nghiệp",     "Cập nhật thông tin doanh nghiệp"),
         ],
         "accent": "#4527A0",
     },
@@ -88,10 +84,10 @@ ROLE_CONFIG: dict[str, dict] = {
         "title":       "Không gian chuyên gia",
         "description": "Đánh giá năng lực ứng viên và cấp chứng nhận chuyên môn.",
         "features": [
-            ("🎯", "Đánh giá kỹ năng",     "Thực hiện và ghi nhận đánh giá"),
-            ("📜", "Cấp chứng nhận",        "Xét duyệt và cấp chứng chỉ"),
-            ("👤", "Hồ sơ chuyên gia",     "Cập nhật thông tin chuyên môn"),
-            ("📈", "Báo cáo chuyên môn",   "Tổng kết hoạt động đánh giá"),
+            ("🏆", "Hồ sơ chuyên gia",      "Cập nhật thông tin chuyên môn"),
+            ("📋", "Hợp đồng của tôi",       "Xem và xử lý lời mời hợp tác"),
+            ("🎯", "Nhiệm vụ của tôi",       "Theo dõi nhiệm vụ được giao"),
+            ("📈", "Thống kê chuyên môn",    "Chưa có báo cáo kết nối Controller"),
         ],
         "accent": "#E65100",
     },
@@ -113,6 +109,9 @@ class _Sidebar(QWidget):
         self._on_open_candidate_profile_cb = None
         self._on_open_company_profile_cb = None
         self._on_open_expert_profile_cb = None
+        self._on_open_expert_search_cb = None
+        self._on_open_contracts_cb = None
+        self._on_open_tasks_cb = None
         self._setup_ui()
 
     def paintEvent(self, event):  # noqa: N802
@@ -188,7 +187,7 @@ class _Sidebar(QWidget):
 
         layout.addSpacing(24)
 
-        # Menu items (placeholder — chưa có action thực)
+        # Routes with available screens are connected by MainWindow.
         cfg = ROLE_CONFIG.get(self._user.role, ROLE_CONFIG["candidate"])
         for icon, label, _ in cfg["features"]:
             btn = self._make_menu_item(icon, label)
@@ -196,6 +195,12 @@ class _Sidebar(QWidget):
                 btn.clicked.connect(self._handle_open_candidate_profile)
             elif self._user.role == "company" and label == "Hồ sơ doanh nghiệp":
                 btn.clicked.connect(self._handle_open_company_profile)
+            elif self._user.role == "company" and label == "Tìm chuyên gia":
+                btn.clicked.connect(self._handle_open_expert_search)
+            elif self._user.role in ("company", "expert") and label == "Hợp đồng của tôi":
+                btn.clicked.connect(self._handle_open_contracts)
+            elif self._user.role in ("company", "expert") and label == "Nhiệm vụ của tôi":
+                btn.clicked.connect(self._handle_open_tasks)
             elif self._user.role == "expert" and label == "Hồ sơ chuyên gia":
                 btn.clicked.connect(self._handle_open_expert_profile)
             layout.addWidget(btn)
@@ -302,13 +307,49 @@ class _Sidebar(QWidget):
         if callable(self._on_open_expert_profile_cb):
             self._on_open_expert_profile_cb()
 
+    @property
+    def on_open_expert_search(self):
+        return self._on_open_expert_search_cb
+
+    @on_open_expert_search.setter
+    def on_open_expert_search(self, cb):
+        self._on_open_expert_search_cb = cb
+
+    def _handle_open_expert_search(self) -> None:
+        if callable(self._on_open_expert_search_cb):
+            self._on_open_expert_search_cb()
+
+    @property
+    def on_open_contracts(self):
+        return self._on_open_contracts_cb
+
+    @on_open_contracts.setter
+    def on_open_contracts(self, cb):
+        self._on_open_contracts_cb = cb
+
+    def _handle_open_contracts(self) -> None:
+        if callable(self._on_open_contracts_cb):
+            self._on_open_contracts_cb()
+
+    @property
+    def on_open_tasks(self):
+        return self._on_open_tasks_cb
+
+    @on_open_tasks.setter
+    def on_open_tasks(self, cb):
+        self._on_open_tasks_cb = cb
+
+    def _handle_open_tasks(self) -> None:
+        if callable(self._on_open_tasks_cb):
+            self._on_open_tasks_cb()
+
 
 # ══════════════════════════════════════════════════════════════════════════════
 # Content area
 # ══════════════════════════════════════════════════════════════════════════════
 
 class _ContentArea(QWidget):
-    """Vùng nội dung chính — placeholder theo role."""
+    """Vùng nội dung chính, phân biệt tính năng đã nối và chưa tích hợp."""
 
     def __init__(self, user: UserModel, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -379,8 +420,28 @@ class _ContentArea(QWidget):
         grid.setSpacing(16)
         grid.setContentsMargins(0, 0, 0, 0)
 
+        active_features = {
+            "candidate": {"Hồ sơ cá nhân"},
+            "company": {
+                "Tìm chuyên gia",
+                "Hợp đồng của tôi",
+                "Nhiệm vụ của tôi",
+                "Hồ sơ doanh nghiệp",
+            },
+            "expert": {
+                "Hồ sơ chuyên gia",
+                "Hợp đồng của tôi",
+                "Nhiệm vụ của tôi",
+            },
+        }
         for i, (icon, label, desc) in enumerate(cfg["features"]):
-            card = self._make_feature_card(icon, label, desc, accent)
+            card = self._make_feature_card(
+                icon,
+                label,
+                desc,
+                accent,
+                available=label in active_features.get(self._user.role, set()),
+            )
             grid.addWidget(card, i // 2, i % 2)
 
         layout.addWidget(grid_widget)
@@ -400,9 +461,9 @@ class _ContentArea(QWidget):
         notice_icon = QLabel("🚧")
         notice_icon.setStyleSheet("font-size:24px; background:transparent; border:none;")
         notice_text = QLabel(
-            "<b>Đang phát triển</b><br>"
-            "Các tính năng nghiệp vụ sẽ được triển khai ở giai đoạn tiếp theo.<br>"
-            "Hệ thống xác thực và điều hướng theo vai trò đã sẵn sàng."
+            "<b>Trạng thái chức năng</b><br>"
+            "Các mục có sẵn được mở từ menu bên trái. Những mục chưa tích hợp "
+            "được đánh dấu riêng; dashboard không hiển thị số liệu giả."
         )
         notice_text.setStyleSheet(f"color:{COLOR_TEXT_DARK}; font-size:12px; background:transparent; border:none;")
         notice_text.setWordWrap(True)
@@ -414,7 +475,14 @@ class _ContentArea(QWidget):
 
         layout.addStretch()
 
-    def _make_feature_card(self, icon: str, label: str, desc: str, accent: str) -> QFrame:
+    def _make_feature_card(
+        self,
+        icon: str,
+        label: str,
+        desc: str,
+        accent: str,
+        available: bool = False,
+    ) -> QFrame:
         card = QFrame()
         card.setStyleSheet(f"""
             QFrame {{
@@ -451,15 +519,15 @@ class _ContentArea(QWidget):
         cl.addLayout(text_col)
         cl.addStretch()
 
-        coming_soon = QLabel("Sắp có")
-        coming_soon.setStyleSheet(f"""
+        status = QLabel("Mở từ menu" if available else "Chưa tích hợp")
+        status.setStyleSheet(f"""
             color: {COLOR_TEXT_MUTED};
             font-size: 10px;
             background: {COLOR_LIGHT_GRAY};
             border-radius: 6px;
             padding: 2px 8px;
         """)
-        cl.addWidget(coming_soon)
+        cl.addWidget(status)
 
         return card
 
@@ -469,11 +537,7 @@ class _ContentArea(QWidget):
 # ══════════════════════════════════════════════════════════════════════════════
 
 class DashboardScreen(QWidget):
-    """
-    Dashboard placeholder cho 6 roles.
-    Kết nối:
-        screen.on_logout = lambda: ...
-    """
+    """Dashboard for non-admin roles with callbacks for supported routes."""
 
     def __init__(self, user: UserModel, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -483,6 +547,9 @@ class DashboardScreen(QWidget):
         self._on_open_candidate_profile_cb = None
         self._on_open_company_profile_cb = None
         self._on_open_expert_profile_cb = None
+        self._on_open_expert_search_cb = None
+        self._on_open_contracts_cb = None
+        self._on_open_tasks_cb = None
         self._setup_ui()
         QTimer.singleShot(80, self._animate_in)
 
@@ -524,6 +591,36 @@ class DashboardScreen(QWidget):
         if self._sidebar:
             self._sidebar.on_open_expert_profile = cb
 
+    @property
+    def on_open_expert_search(self):
+        return self._on_open_expert_search_cb
+
+    @on_open_expert_search.setter
+    def on_open_expert_search(self, cb):
+        self._on_open_expert_search_cb = cb
+        if self._sidebar:
+            self._sidebar.on_open_expert_search = cb
+
+    @property
+    def on_open_contracts(self):
+        return self._on_open_contracts_cb
+
+    @on_open_contracts.setter
+    def on_open_contracts(self, cb):
+        self._on_open_contracts_cb = cb
+        if self._sidebar:
+            self._sidebar.on_open_contracts = cb
+
+    @property
+    def on_open_tasks(self):
+        return self._on_open_tasks_cb
+
+    @on_open_tasks.setter
+    def on_open_tasks(self, cb):
+        self._on_open_tasks_cb = cb
+        if self._sidebar:
+            self._sidebar.on_open_tasks = cb
+
     def _setup_ui(self) -> None:
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -534,6 +631,9 @@ class DashboardScreen(QWidget):
         self._sidebar.on_open_candidate_profile = self._handle_open_candidate_profile
         self._sidebar.on_open_company_profile = self._handle_open_company_profile
         self._sidebar.on_open_expert_profile = self._handle_open_expert_profile
+        self._sidebar.on_open_expert_search = self._handle_open_expert_search
+        self._sidebar.on_open_contracts = self._handle_open_contracts
+        self._sidebar.on_open_tasks = self._handle_open_tasks
 
         self._content = _ContentArea(self._user)
 
@@ -567,3 +667,15 @@ class DashboardScreen(QWidget):
     def _handle_open_expert_profile(self) -> None:
         if callable(self._on_open_expert_profile_cb):
             self._on_open_expert_profile_cb()
+
+    def _handle_open_expert_search(self) -> None:
+        if callable(self._on_open_expert_search_cb):
+            self._on_open_expert_search_cb()
+
+    def _handle_open_contracts(self) -> None:
+        if callable(self._on_open_contracts_cb):
+            self._on_open_contracts_cb()
+
+    def _handle_open_tasks(self) -> None:
+        if callable(self._on_open_tasks_cb):
+            self._on_open_tasks_cb()

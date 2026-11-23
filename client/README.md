@@ -7,23 +7,25 @@
 
 | Thư mục | Trách nhiệm | Mã nguồn hiện dùng |
 |---|---|---|
-| `views/` | Màn hình PySide6 | `client/views/` cho welcome, đăng nhập, đăng ký, dashboard và hồ sơ Candidate |
+| `views/` | Màn hình PySide6 | `client/views/` chứa toàn bộ màn hình PySide6 đang dùng |
 | `components/` | Widget dùng lại | `client/components/`, gồm `PasswordField` |
 | `assets/` | Icon, hình ảnh và tài nguyên | `assets/`; style dùng chung hiện ở `app/utils/styles.py` |
 
-`app/ui/main_window.py` điều phối màn hình bằng `QStackedWidget` và callback.
-Các màn hình có sẵn ngoài `client/views/` (thiết lập lần đầu, hồ sơ Company
-và Expert, tìm kiếm, hợp đồng và nhiệm vụ) vẫn được triển khai trong
-`app/ui/screens/`. Những module tương ứng dưới `app/ui/screens/` đối với
-Welcome, đăng nhập, đăng ký, dashboard và hồ sơ Candidate là lớp tương thích
-để giữ nguyên các import cũ.
+Các màn hình triển khai hiện nằm trong `client/views/`, gồm xác thực, thiết
+lập lần đầu, dashboard theo vai trò, hồ sơ, tìm kiếm chuyên gia, hợp đồng,
+nhiệm vụ và giao diện quản trị. `app/ui/main_window.py` điều phối chúng bằng
+`QStackedWidget` và callback. Các module tương ứng dưới `app/ui/screens/` là
+lớp tương thích để giữ nguyên các import cũ.
 
 ## Luồng MVC
 
 View gửi yêu cầu qua controller trong `server/controllers/`; controller gọi
 service phù hợp và trả kết quả về View. `MainWindow` chịu trách nhiệm điều
 hướng, còn `SessionManager` cung cấp thông tin phiên đăng nhập cho giao diện.
-Các màn hình Admin chưa có nghiệp vụ quản trị vẫn được ghi nhận là placeholder.
+Company và Expert Profile, tìm kiếm, hợp đồng, nhiệm vụ và xác thực sử dụng
+Controller hiện có. Admin Dashboard không tạo số liệu giả. Giao diện quản lý
+người dùng và kỹ năng được kiểm thử qua Controller mock; các thao tác thật vẫn
+chờ User Management và Skill Controller tương ứng.
 
 Chạy ứng dụng từ thư mục gốc bằng `python main.py`. Chạy kiểm thử bằng
 `python -m pytest -q`.
