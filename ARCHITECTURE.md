@@ -442,7 +442,8 @@ create_all_tables()
     └── _apply_migrations()
             ├── MIG-001..MIG-003: Tương thích xác thực và role legacy
             ├── MIG-004: Bảng nghiệp vụ hồ sơ, hợp đồng, task và đánh giá
-            └── MIG-005: Soft-delete và cập nhật trạng thái hợp đồng
+            ├── MIG-005: Soft-delete và cập nhật trạng thái hợp đồng
+            └── MIG-006: Vị trí tuyển dụng, lời mời và trạng thái nộp bài
 ```
 
 **Nguyên tắc migration:**

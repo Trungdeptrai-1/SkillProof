@@ -2,14 +2,34 @@
 
 from server.models.admin_statistics_model import AdminStatisticsModel
 from server.models.app_setting_model import AppSettingModel
+from server.models.recruitment_models import (
+    CandidateExamResultModel,
+    ExamAnswerModel,
+    ExamPaperModel,
+    ExamQuestionModel,
+    ExamSessionModel,
+    JobPostingModel,
+    QuestionOptionModel,
+    RecruitmentInvitationModel,
+    RecruitmentSubmissionModel,
+)
 from server.models.skill_model import SkillModel
 from server.models.user_model import ROLE_ICONS, ROLE_LABELS, UserModel, UserRole
 
 __all__ = [
     "AdminStatisticsModel",
     "AppSettingModel",
+    "CandidateExamResultModel",
+    "ExamAnswerModel",
+    "ExamPaperModel",
+    "ExamQuestionModel",
+    "ExamSessionModel",
+    "JobPostingModel",
+    "QuestionOptionModel",
     "ROLE_ICONS",
     "ROLE_LABELS",
+    "RecruitmentInvitationModel",
+    "RecruitmentSubmissionModel",
     "SkillModel",
     "UserModel",
     "UserRole",

@@ -143,6 +143,7 @@ def _apply_migrations(conn: sqlite3.Connection) -> None:
     _mig_003_remove_hardcoded_admin(conn)
     _mig_004_create_business_tables(conn)
     _mig_005_extend_contracts_and_softdelete(conn)
+    _mig_006_create_recruitment_workflow(conn)
 
 
 # ── MIG-001 ───────────────────────────────────────────────────────────────────
@@ -896,11 +897,317 @@ def _mig_005_extend_contracts_and_softdelete(conn: sqlite3.Connection) -> None:
         raise
 
 
+RECRUITMENT_SCHEMA_SQL = """
+CREATE TABLE IF NOT EXISTS job_postings (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    company_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    title         TEXT    NOT NULL,
+    description   TEXT,
+    requirements TEXT,
+    location      TEXT,
+    status        TEXT    NOT NULL DEFAULT 'draft'
+                          CHECK(status IN ('draft','published','closed')),
+    created_at    TEXT    NOT NULL DEFAULT (datetime('now','localtime')),
+    updated_at    TEXT    NOT NULL DEFAULT (datetime('now','localtime')),
+    UNIQUE(id, company_id)
+);
+CREATE INDEX IF NOT EXISTS idx_job_postings_company_status
+    ON job_postings(company_id, status);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_exam_sessions_recruitment_context
+    ON exam_sessions(id, candidate_id, company_id, exam_paper_id);
+
+CREATE TABLE IF NOT EXISTS recruitment_invitations (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    job_posting_id  INTEGER NOT NULL,
+    company_id      INTEGER NOT NULL,
+    candidate_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    exam_paper_id   INTEGER NOT NULL REFERENCES exam_papers(id) ON DELETE RESTRICT,
+    exam_session_id INTEGER UNIQUE,
+    status          TEXT    NOT NULL DEFAULT 'pending'
+                            CHECK(status IN (
+                                'pending','accepted','declined','cancelled','expired'
+                            )),
+    invited_at      TEXT    NOT NULL DEFAULT (datetime('now','localtime')),
+    responded_at    TEXT,
+    expires_at      TEXT,
+    UNIQUE(id, exam_session_id, candidate_id, company_id, exam_paper_id),
+    FOREIGN KEY(job_posting_id, company_id)
+        REFERENCES job_postings(id, company_id) ON DELETE CASCADE,
+    FOREIGN KEY(exam_session_id, candidate_id, company_id, exam_paper_id)
+        REFERENCES exam_sessions(id, candidate_id, company_id, exam_paper_id)
+        ON DELETE RESTRICT,
+    CHECK(
+        (status = 'pending' AND responded_at IS NULL AND exam_session_id IS NULL)
+        OR
+        (status = 'accepted' AND responded_at IS NOT NULL AND exam_session_id IS NOT NULL)
+        OR
+        (status IN ('declined','cancelled','expired') AND responded_at IS NOT NULL)
+    )
+);
+CREATE INDEX IF NOT EXISTS idx_recruitment_invitations_candidate_status
+    ON recruitment_invitations(candidate_id, status);
+CREATE INDEX IF NOT EXISTS idx_recruitment_invitations_company_status
+    ON recruitment_invitations(company_id, status);
+CREATE INDEX IF NOT EXISTS idx_recruitment_invitations_job_candidate_paper
+    ON recruitment_invitations(job_posting_id, candidate_id, exam_paper_id);
+
+CREATE TABLE IF NOT EXISTS recruitment_submissions (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    invitation_id   INTEGER NOT NULL,
+    exam_session_id INTEGER NOT NULL,
+    candidate_id    INTEGER NOT NULL,
+    company_id      INTEGER NOT NULL,
+    exam_paper_id   INTEGER NOT NULL,
+    status          TEXT    NOT NULL DEFAULT 'submitted'
+                            CHECK(status IN ('submitted','grading','graded','released')),
+    submitted_at    TEXT    NOT NULL DEFAULT (datetime('now','localtime')),
+    graded_at       TEXT,
+    released_at     TEXT,
+    UNIQUE(invitation_id),
+    UNIQUE(exam_session_id),
+    FOREIGN KEY(
+        invitation_id, exam_session_id, candidate_id, company_id, exam_paper_id
+    ) REFERENCES recruitment_invitations(
+        id, exam_session_id, candidate_id, company_id, exam_paper_id
+    ) ON DELETE CASCADE,
+    FOREIGN KEY(exam_session_id, candidate_id, company_id, exam_paper_id)
+        REFERENCES exam_sessions(id, candidate_id, company_id, exam_paper_id)
+        ON DELETE CASCADE,
+    CHECK(
+        (status IN ('submitted','grading') AND graded_at IS NULL AND released_at IS NULL)
+        OR
+        (status = 'graded' AND graded_at IS NOT NULL AND released_at IS NULL)
+        OR
+        (status = 'released' AND graded_at IS NOT NULL AND released_at IS NOT NULL)
+    )
+);
+CREATE INDEX IF NOT EXISTS idx_recruitment_submissions_status
+    ON recruitment_submissions(status);
+"""
+
+RECRUITMENT_TRIGGERS_SQL = """
+CREATE TRIGGER IF NOT EXISTS trg_job_postings_updated
+AFTER UPDATE ON job_postings
+BEGIN
+    UPDATE job_postings SET updated_at = datetime('now','localtime')
+    WHERE id = NEW.id;
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_job_postings_company_owner
+BEFORE INSERT ON job_postings
+WHEN COALESCE((SELECT role FROM users WHERE id = NEW.company_id), '') <> 'company'
+BEGIN
+    SELECT RAISE(ABORT, 'job posting owner must be a company');
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_job_postings_owner_immutable
+BEFORE UPDATE OF company_id ON job_postings
+WHEN NEW.company_id <> OLD.company_id
+BEGIN
+    SELECT RAISE(ABORT, 'job posting owner cannot be changed');
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_recruitment_invitation_eligibility
+BEFORE INSERT ON recruitment_invitations
+WHEN COALESCE((SELECT role FROM users WHERE id = NEW.company_id), '') <> 'company'
+ OR COALESCE((SELECT role FROM users WHERE id = NEW.candidate_id), '') <> 'candidate'
+ OR COALESCE(
+    (SELECT status FROM job_postings WHERE id = NEW.job_posting_id), ''
+ ) <> 'published'
+ OR COALESCE(
+    (SELECT is_published FROM exam_papers WHERE id = NEW.exam_paper_id), 0
+ ) <> 1
+BEGIN
+    SELECT RAISE(ABORT, 'invitation requires a published job and exam for a candidate');
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_recruitment_invitation_initial_status
+BEFORE INSERT ON recruitment_invitations
+WHEN NEW.status <> 'pending'
+BEGIN
+    SELECT RAISE(ABORT, 'new recruitment invitations must be pending');
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_recruitment_invitation_identity_immutable
+BEFORE UPDATE OF
+    job_posting_id, company_id, candidate_id, exam_paper_id, exam_session_id
+ON recruitment_invitations
+WHEN NEW.job_posting_id IS NOT OLD.job_posting_id
+ OR NEW.company_id IS NOT OLD.company_id
+ OR NEW.candidate_id IS NOT OLD.candidate_id
+ OR NEW.exam_paper_id IS NOT OLD.exam_paper_id
+ OR (
+    OLD.exam_session_id IS NOT NULL
+    AND NEW.exam_session_id IS NOT OLD.exam_session_id
+ )
+BEGIN
+    SELECT RAISE(ABORT, 'invitation identity and linked session cannot be changed');
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_recruitment_invitation_status_transition
+BEFORE UPDATE OF status ON recruitment_invitations
+WHEN NEW.status <> OLD.status
+ AND NOT (
+    (OLD.status = 'pending'
+     AND NEW.status IN ('accepted','declined','cancelled','expired'))
+    OR
+    (OLD.status = 'accepted' AND NEW.status IN ('cancelled','expired'))
+ )
+BEGIN
+    SELECT RAISE(ABORT, 'invalid recruitment invitation status transition');
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_recruitment_invitation_accept_session
+BEFORE UPDATE OF status ON recruitment_invitations
+WHEN NEW.status = 'accepted'
+ AND NEW.status <> OLD.status
+ AND COALESCE(
+    (SELECT status FROM exam_sessions WHERE id = NEW.exam_session_id), ''
+ ) <> 'scheduled'
+BEGIN
+    SELECT RAISE(ABORT, 'accepted invitation requires a scheduled exam session');
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_recruitment_submission_initial_status
+BEFORE INSERT ON recruitment_submissions
+WHEN NEW.status <> 'submitted'
+ OR COALESCE(
+    (SELECT status FROM recruitment_invitations WHERE id = NEW.invitation_id), ''
+ ) <> 'accepted'
+ OR COALESCE(
+    (SELECT status FROM exam_sessions WHERE id = NEW.exam_session_id), ''
+ ) <> 'completed'
+BEGIN
+    SELECT RAISE(ABORT, 'submission requires an accepted invitation and completed exam');
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_recruitment_submission_status_transition
+BEFORE UPDATE OF status ON recruitment_submissions
+WHEN NEW.status <> OLD.status
+ AND NOT (
+    (OLD.status = 'submitted' AND NEW.status = 'grading')
+    OR (OLD.status = 'grading' AND NEW.status = 'graded')
+    OR (OLD.status = 'graded' AND NEW.status = 'released')
+ )
+BEGIN
+    SELECT RAISE(ABORT, 'invalid recruitment submission status transition');
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_recruitment_submission_identity_immutable
+BEFORE UPDATE OF
+    invitation_id, exam_session_id, candidate_id, company_id, exam_paper_id
+ON recruitment_submissions
+WHEN NEW.invitation_id <> OLD.invitation_id
+ OR NEW.exam_session_id <> OLD.exam_session_id
+ OR NEW.candidate_id <> OLD.candidate_id
+ OR NEW.company_id <> OLD.company_id
+ OR NEW.exam_paper_id <> OLD.exam_paper_id
+BEGIN
+    SELECT RAISE(ABORT, 'submission identity cannot be changed');
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_recruitment_submission_requires_grade
+BEFORE UPDATE OF status ON recruitment_submissions
+WHEN NEW.status IN ('graded','released')
+ AND (
+    (SELECT total_score FROM exam_sessions WHERE id = NEW.exam_session_id) IS NULL
+    OR (SELECT max_score FROM exam_sessions WHERE id = NEW.exam_session_id) <= 0
+    OR EXISTS (
+        SELECT 1 FROM exam_answers
+        WHERE exam_session_id = NEW.exam_session_id AND is_graded = 0
+    )
+ )
+BEGIN
+    SELECT RAISE(ABORT, 'all exam answers must be graded before releasing results');
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_exam_answers_valid_option_insert
+BEFORE INSERT ON exam_answers
+WHEN NEW.selected_option_id IS NOT NULL
+ AND NOT EXISTS (
+    SELECT 1 FROM question_options
+    WHERE id = NEW.selected_option_id AND question_id = NEW.question_id
+ )
+BEGIN
+    SELECT RAISE(ABORT, 'selected option does not belong to the question');
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_exam_answers_valid_option_update
+BEFORE UPDATE OF selected_option_id, question_id ON exam_answers
+WHEN NEW.selected_option_id IS NOT NULL
+ AND NOT EXISTS (
+    SELECT 1 FROM question_options
+    WHERE id = NEW.selected_option_id AND question_id = NEW.question_id
+ )
+BEGIN
+    SELECT RAISE(ABORT, 'selected option does not belong to the question');
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_recruitment_exam_answers_insert_in_progress
+BEFORE INSERT ON exam_answers
+WHEN EXISTS (
+    SELECT 1
+    FROM recruitment_invitations ri
+    JOIN exam_sessions es ON es.id = ri.exam_session_id
+    WHERE ri.exam_session_id = NEW.exam_session_id AND es.status <> 'in_progress'
+ )
+BEGIN
+    SELECT RAISE(ABORT, 'recruitment answers can only be added in progress');
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_recruitment_exam_answers_update_in_progress
+BEFORE UPDATE OF answer_text, answer_code, selected_option_id ON exam_answers
+WHEN EXISTS (
+    SELECT 1
+    FROM recruitment_invitations ri
+    JOIN exam_sessions es ON es.id = ri.exam_session_id
+    WHERE ri.exam_session_id = NEW.exam_session_id AND es.status <> 'in_progress'
+ )
+BEGIN
+    SELECT RAISE(ABORT, 'recruitment answers can only be changed in progress');
+END;
+"""
+
+
+def _mig_006_create_recruitment_workflow(conn: sqlite3.Connection) -> None:
+    """MIG-006: Add recruitment records while reusing existing exam tables."""
+    required_tables = {
+        "exam_papers",
+        "exam_sessions",
+        "exam_answers",
+        "question_bank",
+        "question_options",
+    }
+    existing_tables = {
+        row[0]
+        for row in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        ).fetchall()
+    }
+    missing_tables = required_tables - existing_tables
+    if missing_tables:
+        raise RuntimeError(
+            f"MIG-006 requires existing exam tables: {sorted(missing_tables)}"
+        )
+
+    conn.executescript(RECRUITMENT_SCHEMA_SQL)
+    conn.executescript(RECRUITMENT_TRIGGERS_SQL)
+    conn.commit()
+    logger.info("MIG-006: recruitment tables, constraints and triggers are ready.")
+
+
 # ── Tiện ích ──────────────────────────────────────────────────────────────────
 
 def drop_all_tables() -> None:
     """Xoá toàn bộ bảng — CHỈ dùng cho testing."""
-    # Bảng mới (Giai đoạn 03) — drop theo thứ tự ngược FK
+    # Recruitment tables (MIG-006) — drop before their referenced exam tables.
+    recruitment_tables = [
+        "recruitment_submissions",
+        "recruitment_invitations",
+        "job_postings",
+    ]
+    # Business tables (MIG-004/005) — drop theo thứ tự ngược FK
     business_tables = [
         "tasks", "company_expert_contracts",
         "interview_evaluations", "interview_participants", "interviews",
@@ -915,7 +1222,7 @@ def drop_all_tables() -> None:
         "courses", "skills", "users", "app_settings",
     ]
     conn = db.get_connection()
-    for table in business_tables + old_tables:
+    for table in recruitment_tables + business_tables + old_tables:
         conn.execute(f"DROP TABLE IF EXISTS {table};")
     conn.commit()
     logger.warning("drop_all_tables(): đã xoá toàn bộ bảng CSDL.")
