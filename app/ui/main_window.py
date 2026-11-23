@@ -8,8 +8,10 @@ from __future__ import annotations
 from PySide6.QtWidgets import QMainWindow, QMessageBox, QStackedWidget
 
 from client.views.admin_dashboard_screen import AdminDashboardScreen
+from client.views.candidate_assessment_screen import CandidateAssessmentScreen
 from client.views.candidate_profile_screen import CandidateProfileScreen
 from client.views.company_profile_screen import CompanyProfileScreen
+from client.views.company_recruitment_screen import CompanyRecruitmentScreen
 from client.views.contract_management_screen import ContractManagementScreen
 from client.views.dashboard_screen import DashboardScreen
 from client.views.expert_profile_screen import ExpertProfileScreen
@@ -21,6 +23,10 @@ from client.views.skill_management_screen import SkillManagementScreen
 from client.views.task_management_screen import TaskManagementScreen
 from client.views.user_management_screen import UserManagementScreen
 from client.views.welcome_screen import WelcomeScreen
+from client.views.recruitment_contracts import (
+    CandidateAssessmentController,
+    CompanyRecruitmentController,
+)
 from app.models.user_model            import UserModel
 from server.controllers.admin_controller import AdminController
 from server.controllers.auth_controller import auth_controller
@@ -34,7 +40,12 @@ from app.utils.constants import (
 class MainWindow(QMainWindow):
     """Cửa sổ gốc SkillProof."""
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        company_recruitment_controller: CompanyRecruitmentController | None = None,
+        candidate_assessment_controller: CandidateAssessmentController | None = None,
+    ) -> None:
         super().__init__()
         self._dashboard: DashboardScreen | AdminDashboardScreen | None = None
         self._first_run: FirstRunScreen | None  = None
@@ -47,7 +58,11 @@ class MainWindow(QMainWindow):
         self._tasks: TaskManagementScreen | None = None
         self._user_management: UserManagementScreen | None = None
         self._skill_management: SkillManagementScreen | None = None
+        self._company_recruitment: CompanyRecruitmentScreen | None = None
+        self._candidate_assessments: CandidateAssessmentScreen | None = None
         self._admin_controller = AdminController()
+        self._company_recruitment_controller = company_recruitment_controller
+        self._candidate_assessment_controller = candidate_assessment_controller
         self._setup_window()
         self._setup_central_widget()
         self._route_initial()
@@ -139,6 +154,7 @@ class MainWindow(QMainWindow):
 
     def _show_dashboard(self, user: UserModel) -> None:
         self._discard_admin_screens()
+        self._discard_recruitment_screens()
         if self._dashboard is not None:
             self._stack.removeWidget(self._dashboard)
             self._dashboard.deleteLater()
@@ -161,12 +177,22 @@ class MainWindow(QMainWindow):
             dashboard.on_open_expert_search = self._show_expert_search
             dashboard.on_open_contracts = self._show_contracts
             dashboard.on_open_tasks = self._show_tasks
+            dashboard.on_open_company_recruitment = self._show_company_recruitment
+            dashboard.on_open_candidate_assessments = self._show_candidate_assessments
         self._dashboard = dashboard
         self._stack.addWidget(self._dashboard)
         self._stack.setCurrentWidget(self._dashboard)
 
     def _discard_admin_screens(self) -> None:
         for attribute in ("_user_management", "_skill_management"):
+            screen = getattr(self, attribute)
+            if screen is not None:
+                self._stack.removeWidget(screen)
+                screen.deleteLater()
+                setattr(self, attribute, None)
+
+    def _discard_recruitment_screens(self) -> None:
+        for attribute in ("_company_recruitment", "_candidate_assessments"):
             screen = getattr(self, attribute)
             if screen is not None:
                 self._stack.removeWidget(screen)
@@ -181,6 +207,17 @@ class MainWindow(QMainWindow):
             session.is_logged_in
             and session.current_user is not None
             and session.current_user.role == "admin"
+        )
+
+    @staticmethod
+    def _has_session_role(role: str) -> bool:
+        from app.services.auth_service import SessionManager
+
+        session = SessionManager.instance()
+        return bool(
+            session.is_logged_in
+            and session.current_user is not None
+            and session.current_user.role == role
         )
 
     def _show_user_management(self) -> None:
@@ -211,6 +248,36 @@ class MainWindow(QMainWindow):
 
     def _on_admin_management_back(self) -> None:
         if self._dashboard is not None and self._is_admin_session():
+            self._stack.setCurrentWidget(self._dashboard)
+
+    def _show_company_recruitment(self) -> None:
+        if not self._has_session_role("company"):
+            return
+        if self._company_recruitment is None:
+            self._company_recruitment = CompanyRecruitmentScreen(
+                controller=self._company_recruitment_controller
+            )
+            self._company_recruitment.on_back = self._on_recruitment_back
+            self._stack.addWidget(self._company_recruitment)
+        else:
+            self._company_recruitment.refresh()
+        self._stack.setCurrentWidget(self._company_recruitment)
+
+    def _show_candidate_assessments(self) -> None:
+        if not self._has_session_role("candidate"):
+            return
+        if self._candidate_assessments is None:
+            self._candidate_assessments = CandidateAssessmentScreen(
+                controller=self._candidate_assessment_controller
+            )
+            self._candidate_assessments.on_back = self._on_recruitment_back
+            self._stack.addWidget(self._candidate_assessments)
+        else:
+            self._candidate_assessments.refresh_invitations()
+        self._stack.setCurrentWidget(self._candidate_assessments)
+
+    def _on_recruitment_back(self) -> None:
+        if self._dashboard is not None:
             self._stack.setCurrentWidget(self._dashboard)
 
     # ── Company Profile ───────────────────────────────────────────────────────
@@ -384,6 +451,7 @@ class MainWindow(QMainWindow):
 
     def _on_logout(self) -> None:
         self._discard_admin_screens()
+        self._discard_recruitment_screens()
         self._show_login()
 
     def _on_learn_more(self) -> None:
