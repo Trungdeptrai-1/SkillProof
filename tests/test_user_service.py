@@ -76,6 +76,14 @@ class TestRegisterSuccess:
         assert r.success
         assert r.user.username == "myname"
 
+    def test_register_duplicate_username_prefix_gets_unique_suffix(self, svc):
+        first = svc.register("First", "shared@test.com", "PassWord1", "PassWord1")
+        second = svc.register("Second", "shared@other.com", "PassWord1", "PassWord1")
+
+        assert first.success
+        assert second.success
+        assert second.user.username != first.user.username
+
     def test_register_multiple_users(self, svc, fresh_db):
         """Đăng ký nhiều user khác nhau."""
         for i in range(3):
@@ -241,7 +249,7 @@ class TestDatabaseError:
         svc = UserService()
         from unittest.mock import patch
         import sqlite3
-        with patch("app.services.user_service.db") as mock_db:
+        with patch("server.services.user_service.db") as mock_db:
             mock_db.fetchone.side_effect = sqlite3.OperationalError("gone")
             r = svc.register("Test", "test@x.com", "PassWord1", "PassWord1")
         assert not r.success

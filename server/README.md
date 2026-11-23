@@ -10,14 +10,14 @@ trên máy người dùng bằng `python main.py`.
 |---|---|---|
 | `database/` | Kết nối SQLite, schema và migration | `app/database/connection.py`, `app/database/schema.py` |
 | `models/` | Các đối tượng dữ liệu/DTO | `app/models/user_model.py`; một số model nghiệp vụ hiện khai báo trong `app/services/` |
-| `services/` | Nghiệp vụ ứng dụng và truy cập dữ liệu | Xác thực: `server/services/auth_service.py`; các nghiệp vụ khác hiện ở `app/services/` |
-| `controllers/` | Điều phối luồng giữa giao diện và services | Xác thực: `server/controllers/auth_controller.py`; điều hướng màn hình vẫn ở `app/ui/main_window.py` |
+| `services/` | Nghiệp vụ ứng dụng và truy cập dữ liệu | Xác thực, hồ sơ ứng viên, đăng ký: `server/services/` |
+| `controllers/` | Điều phối luồng giữa giao diện và services | Xác thực, hồ sơ ứng viên, đăng ký: `server/controllers/`; điều hướng màn hình vẫn ở `app/ui/main_window.py` |
 
 `main.py` khởi tạo logging, gọi `create_all_tables()` từ `app.database`, sau
-đó tạo `QApplication` và `MainWindow`. `AuthService` cùng `AuthController` đã
-được triển khai cho luồng xác thực. `app/services/auth_service.py` chỉ re-export
-các symbol từ service mới để giữ tương thích với các import hiện hành; không
-có hai bản triển khai nghiệp vụ.
+đó tạo `QApplication` và `MainWindow`. Các service xác thực, hồ sơ ứng viên,
+đăng ký người dùng và controller tương ứng được triển khai tại `server/`.
+Các module cùng tên trong `app/services/` chỉ re-export các symbol mới để giữ
+tương thích với import hiện hành; không có hai bản triển khai nghiệp vụ.
 
 ## Phạm vi
 
@@ -25,6 +25,9 @@ có hai bản triển khai nghiệp vụ.
 - Không tạo module Python placeholder; thư mục chưa có mã thực thi được giữ
   trong Git bằng `.gitkeep`.
 - SQLite và luồng khởi động không thay đổi.
-- `LoginScreen` hiện vẫn gọi `app.services.auth_service.auth_service` trực tiếp.
-  Khi tích hợp controller, UI cần được phối hợp để gọi `AuthController.login()`;
-  thay đổi UI nằm ngoài phạm vi triển khai này.
+- `LoginScreen`, `RegisterScreen` và `CandidateProfileScreen` hiện vẫn gọi
+  service trực tiếp qua adapter `app/services/`. Tích hợp UI sang
+  `AuthController`, `UserController` và `CandidateProfileController` cần được
+  phối hợp riêng; thay đổi UI nằm ngoài phạm vi triển khai này.
+- Chưa có màn hình hoặc quy tắc phân quyền quản trị danh sách tài khoản, tìm
+  kiếm/lọc hay đổi trạng thái người dùng; các nghiệp vụ đó chưa được thêm.
