@@ -12,11 +12,12 @@ server.
 | `components/` | Widget và thành phần giao diện tái sử dụng | `client/components/` |
 | `assets/` | Icon, hình ảnh và tài nguyên giao diện | `assets/icons/`, `assets/images/`; style hiện ở `app/utils/styles.py` |
 
-Welcome, đăng nhập và đăng ký hiện được triển khai trong `client/views/`.
-Các module cùng tên dưới `app/ui/screens/` là lớp chuyển tiếp để giữ nguyên
-các import hiện có. `MainWindow` tiếp tục điều hướng bằng `QStackedWidget`
-và callback; các màn hình gọi services trong `app/services/`.
+Welcome, đăng nhập, đăng ký, dashboard và hồ sơ ứng viên được triển khai
+trong `client/views/`. Các module cùng tên dưới `app/ui/screens/` là lớp
+chuyển tiếp để giữ nguyên các import hiện có. `MainWindow` tiếp tục điều
+hướng bằng `QStackedWidget` và callback; các màn hình gọi services trong
+`app/services/`.
 
 `PasswordField` trong `client/components/` được dùng chung bởi các màn hình
 đăng nhập, đăng ký và thiết lập lần đầu. Các màn hình nghiệp vụ khác vẫn ở
-`app/ui/screens/` và không bị thay đổi trong lần chuyển này.
+`app/ui/screens/`.
