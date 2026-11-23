@@ -48,6 +48,7 @@ class UserModel:
     is_active:   bool
     created_at:  str
     updated_at:  str
+    is_deleted:  bool = False
 
     # ── Thuộc tính dẫn xuất ──────────────────────────────────────────────────
 
@@ -84,6 +85,7 @@ class UserModel:
             is_active   = bool(row["is_active"]),
             created_at  = row["created_at"],
             updated_at  = row["updated_at"],
+            is_deleted  = bool(row["is_deleted"]) if "is_deleted" in row.keys() else False,
         )
 
     def __repr__(self) -> str:
