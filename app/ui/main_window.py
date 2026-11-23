@@ -7,17 +7,20 @@ from __future__ import annotations
 
 from PySide6.QtWidgets import QMainWindow, QMessageBox, QStackedWidget
 
-from app.ui.screens.welcome_screen    import WelcomeScreen
-from app.ui.screens.login_screen      import LoginScreen
-from app.ui.screens.register_screen   import RegisterScreen
-from app.ui.screens.dashboard_screen  import DashboardScreen
-from app.ui.screens.first_run_screen  import FirstRunScreen
-from app.ui.screens.company_profile_screen import CompanyProfileScreen
-from app.ui.screens.candidate_profile_screen import CandidateProfileScreen
-from app.ui.screens.expert_profile_screen import ExpertProfileScreen
-from app.ui.screens.expert_search_screen import ExpertSearchScreen
-from app.ui.screens.contract_management_screen import ContractManagementScreen
-from app.ui.screens.task_management_screen import TaskManagementScreen
+from client.views.admin_dashboard_screen import AdminDashboardScreen
+from client.views.candidate_profile_screen import CandidateProfileScreen
+from client.views.company_profile_screen import CompanyProfileScreen
+from client.views.contract_management_screen import ContractManagementScreen
+from client.views.dashboard_screen import DashboardScreen
+from client.views.expert_profile_screen import ExpertProfileScreen
+from client.views.expert_search_screen import ExpertSearchScreen
+from client.views.first_run_screen import FirstRunScreen
+from client.views.login_screen import LoginScreen
+from client.views.register_screen import RegisterScreen
+from client.views.skill_management_screen import SkillManagementScreen
+from client.views.task_management_screen import TaskManagementScreen
+from client.views.user_management_screen import UserManagementScreen
+from client.views.welcome_screen import WelcomeScreen
 from app.models.user_model            import UserModel
 from server.controllers.auth_controller import auth_controller
 from app.utils.constants import (
@@ -32,7 +35,7 @@ class MainWindow(QMainWindow):
 
     def __init__(self) -> None:
         super().__init__()
-        self._dashboard: DashboardScreen | None = None
+        self._dashboard: DashboardScreen | AdminDashboardScreen | None = None
         self._first_run: FirstRunScreen | None  = None
         self._register:  RegisterScreen | None  = None
         self._company_profile: CompanyProfileScreen | None = None
@@ -41,6 +44,8 @@ class MainWindow(QMainWindow):
         self._expert_search: ExpertSearchScreen | None = None
         self._contracts: ContractManagementScreen | None = None
         self._tasks: TaskManagementScreen | None = None
+        self._user_management: UserManagementScreen | None = None
+        self._skill_management: SkillManagementScreen | None = None
         self._setup_window()
         self._setup_central_widget()
         self._route_initial()
@@ -131,18 +136,73 @@ class MainWindow(QMainWindow):
     # ── Dashboard ─────────────────────────────────────────────────────────────
 
     def _show_dashboard(self, user: UserModel) -> None:
+        self._discard_admin_screens()
         if self._dashboard is not None:
             self._stack.removeWidget(self._dashboard)
             self._dashboard.deleteLater()
             self._dashboard = None
 
-        self._dashboard = DashboardScreen(user)
-        self._dashboard.on_logout = self._on_logout
-        self._dashboard.on_open_candidate_profile = self._show_candidate_profile
-        self._dashboard.on_open_company_profile = self._show_company_profile
-        self._dashboard.on_open_expert_profile = self._show_expert_profile
+        if user.role == "admin":
+            dashboard = AdminDashboardScreen(user)
+            dashboard.on_logout = self._on_logout
+            dashboard.on_open_users = self._show_user_management
+            dashboard.on_open_skills = self._show_skill_management
+        else:
+            dashboard = DashboardScreen(user)
+            dashboard.on_logout = self._on_logout
+            dashboard.on_open_candidate_profile = self._show_candidate_profile
+            dashboard.on_open_company_profile = self._show_company_profile
+            dashboard.on_open_expert_profile = self._show_expert_profile
+            dashboard.on_open_expert_search = self._show_expert_search
+            dashboard.on_open_contracts = self._show_contracts
+            dashboard.on_open_tasks = self._show_tasks
+        self._dashboard = dashboard
         self._stack.addWidget(self._dashboard)
         self._stack.setCurrentWidget(self._dashboard)
+
+    def _discard_admin_screens(self) -> None:
+        for attribute in ("_user_management", "_skill_management"):
+            screen = getattr(self, attribute)
+            if screen is not None:
+                self._stack.removeWidget(screen)
+                screen.deleteLater()
+                setattr(self, attribute, None)
+
+    def _is_admin_session(self) -> bool:
+        from app.services.auth_service import SessionManager
+
+        session = SessionManager.instance()
+        return bool(
+            session.is_logged_in
+            and session.current_user is not None
+            and session.current_user.role == "admin"
+        )
+
+    def _show_user_management(self) -> None:
+        if not self._is_admin_session():
+            return
+        if self._user_management is not None:
+            self._stack.removeWidget(self._user_management)
+            self._user_management.deleteLater()
+        self._user_management = UserManagementScreen()
+        self._user_management.on_back = self._on_admin_management_back
+        self._stack.addWidget(self._user_management)
+        self._stack.setCurrentWidget(self._user_management)
+
+    def _show_skill_management(self) -> None:
+        if not self._is_admin_session():
+            return
+        if self._skill_management is not None:
+            self._stack.removeWidget(self._skill_management)
+            self._skill_management.deleteLater()
+        self._skill_management = SkillManagementScreen()
+        self._skill_management.on_back = self._on_admin_management_back
+        self._stack.addWidget(self._skill_management)
+        self._stack.setCurrentWidget(self._skill_management)
+
+    def _on_admin_management_back(self) -> None:
+        if self._dashboard is not None and self._is_admin_session():
+            self._stack.setCurrentWidget(self._dashboard)
 
     # ── Company Profile ───────────────────────────────────────────────────────
 
@@ -240,6 +300,7 @@ class MainWindow(QMainWindow):
 
         self._expert_search = ExpertSearchScreen()
         self._expert_search.on_back = self._on_expert_search_back
+        self._expert_search.on_view_contracts = self._show_contracts
         self._stack.addWidget(self._expert_search)
         self._stack.setCurrentWidget(self._expert_search)
 
@@ -266,6 +327,7 @@ class MainWindow(QMainWindow):
 
         self._contracts = ContractManagementScreen()
         self._contracts.on_back = self._on_contracts_back
+        self._contracts.on_find_experts = self._show_expert_search
         self._stack.addWidget(self._contracts)
         self._stack.setCurrentWidget(self._contracts)
 
@@ -312,6 +374,7 @@ class MainWindow(QMainWindow):
         self._show_dashboard(user)
 
     def _on_logout(self) -> None:
+        self._discard_admin_screens()
         self._show_login()
 
     def _on_learn_more(self) -> None:
