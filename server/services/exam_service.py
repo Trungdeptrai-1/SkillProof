@@ -253,7 +253,6 @@ class ExamService:
             "results",
             "results_released",
             "score",
-            "selected_option_id",
             "total_score",
         }
     )
@@ -810,9 +809,7 @@ class ExamService:
             return ExamResult(ExamResult.DB_ERROR)
         return ExamResult(
             ExamResult.SUCCESS,
-            result=submission,
-            score=score,
-            max_score=max_score,
+            result={"status": "submitted"},
         )
 
     @classmethod

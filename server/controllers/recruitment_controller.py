@@ -56,3 +56,8 @@ class RecruitmentController:
 
     def list_positions(self) -> RecruitmentResult:
         return self._service.list_positions()
+
+    def list_candidates(self, search: str = "") -> RecruitmentResult:
+        if not isinstance(search, str):
+            return RecruitmentResult(RecruitmentResult.INVALID_INPUT)
+        return self._service.list_candidates(search)

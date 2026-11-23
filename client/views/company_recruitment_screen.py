@@ -122,7 +122,7 @@ class CompanyRecruitmentScreen(QWidget):
         self._positions_status = StatusBanner(tab)
         layout.addWidget(self._positions_status)
         self._positions_table = self._make_table(
-            ["Mã", "Vị trí", "Địa điểm", "Hình thức", "Trạng thái"]
+            ["Mã", "Vị trí", "Địa điểm", "Trạng thái"]
         )
         self._positions_table.itemSelectionChanged.connect(
             self._position_selection_changed
@@ -134,17 +134,19 @@ class CompanyRecruitmentScreen(QWidget):
         self._position_title.setPlaceholderText("Ví dụ: Kỹ sư phần mềm")
         self._position_location = QLineEdit()
         self._position_location.setPlaceholderText("Địa điểm làm việc")
-        self._position_type = QComboBox()
-        self._position_type.addItem("Toàn thời gian", "full_time")
-        self._position_type.addItem("Bán thời gian", "part_time")
-        self._position_type.addItem("Hợp đồng", "contract")
-        self._position_type.addItem("Thực tập", "internship")
         self._position_description = QTextEdit()
         self._position_description.setMaximumHeight(76)
+        self._position_requirements = QTextEdit()
+        self._position_requirements.setMaximumHeight(60)
+        self._position_status = QComboBox()
+        self._position_status.addItem("Bản nháp", "draft")
+        self._position_status.addItem("Đang tuyển", "published")
+        self._position_status.addItem("Đã đóng", "closed")
         form.addRow("Tên vị trí *", self._position_title)
-        form.addRow("Địa điểm *", self._position_location)
-        form.addRow("Hình thức", self._position_type)
+        form.addRow("Địa điểm", self._position_location)
         form.addRow("Mô tả", self._position_description)
+        form.addRow("Yêu cầu", self._position_requirements)
+        form.addRow("Trạng thái", self._position_status)
         layout.addLayout(form)
 
         actions = QHBoxLayout()
@@ -283,12 +285,20 @@ class CompanyRecruitmentScreen(QWidget):
         self._results_refresh = QPushButton("Tải kết quả")
         self._results_refresh.setStyleSheet(secondary_button_style(font_size=12))
         self._results_refresh.clicked.connect(self.refresh_results)
+        self._results_release = QPushButton("Công bố kết quả")
+        self._results_release.setStyleSheet(secondary_button_style(font_size=12))
+        self._results_release.setEnabled(False)
+        self._results_release.clicked.connect(self._release_selected_results)
         controls.addWidget(self._results_refresh)
+        controls.addWidget(self._results_release)
         layout.addLayout(controls)
         self._results_status = StatusBanner(tab)
         layout.addWidget(self._results_status)
         self._results_table = self._make_table(
             ["Ứng viên", "Vị trí", "Bài thi", "Điểm", "Trạng thái", "Nộp lúc"]
+        )
+        self._results_table.itemSelectionChanged.connect(
+            self._result_selection_changed
         )
         layout.addWidget(self._results_table, stretch=1)
         return tab
@@ -315,8 +325,9 @@ class CompanyRecruitmentScreen(QWidget):
             self._positions_refresh,
             self._position_title,
             self._position_location,
-            self._position_type,
             self._position_description,
+            self._position_requirements,
+            self._position_status,
             self._position_save,
             self._position_edit,
             self._position_clear,
@@ -339,6 +350,7 @@ class CompanyRecruitmentScreen(QWidget):
             self._candidate_refresh,
             self._send_invitation,
             self._results_refresh,
+            self._results_release,
             self._results_table,
         ):
             widget.setEnabled(False)
@@ -506,7 +518,6 @@ class CompanyRecruitmentScreen(QWidget):
                 str(position.id),
                 position.title,
                 position.location,
-                position.employment_type,
                 position.status,
             )
             for column, value in enumerate(values):
@@ -517,7 +528,11 @@ class CompanyRecruitmentScreen(QWidget):
         self._filter_positions(self._position_search.text())
         self._fill_combo(
             self._invite_position,
-            ((position.title, position.id) for position in self._positions),
+            (
+                (position.title, position.id)
+                for position in self._positions
+                if position.status == "published"
+            ),
         )
 
     def _render_assessments(self) -> None:
@@ -558,7 +573,52 @@ class CompanyRecruitmentScreen(QWidget):
                 result.submitted_at,
             )
             for column, value in enumerate(values):
-                self._results_table.setItem(row, column, QTableWidgetItem(value))
+                item = QTableWidgetItem(value)
+                if column == 0:
+                    item.setData(Qt.ItemDataRole.UserRole, result.exam_id)
+                    item.setData(Qt.ItemDataRole.UserRole + 1, result.status)
+                self._results_table.setItem(row, column, item)
+        self._result_selection_changed()
+
+    def _selected_result(self) -> tuple[int, str] | None:
+        row = self._results_table.currentRow()
+        if row < 0:
+            return None
+        item = self._results_table.item(row, 0)
+        if item is None:
+            return None
+        exam_id = item.data(Qt.ItemDataRole.UserRole)
+        status = item.data(Qt.ItemDataRole.UserRole + 1)
+        if not isinstance(exam_id, int) or not isinstance(status, str):
+            return None
+        return exam_id, status
+
+    def _result_selection_changed(self) -> None:
+        selected = self._selected_result()
+        self._results_release.setEnabled(
+            self._controller is not None
+            and selected is not None
+            and selected[1] == "graded"
+        )
+
+    def _release_selected_results(self) -> None:
+        selected = self._selected_result()
+        if self._controller is None or selected is None:
+            return
+        exam_id, status = selected
+        if status != "graded":
+            self._status.set_status(
+                "Chỉ có thể công bố kết quả đã chấm.", "error"
+            )
+            return
+        result = self._controller.release_results(exam_id)
+        if not result.success:
+            self._status.set_status(
+                result.message or "Không thể công bố kết quả.", "error"
+            )
+            return
+        self._status.set_status("Đã công bố kết quả bài thi.", "success")
+        self.refresh_results()
 
     @staticmethod
     def _fill_combo(
@@ -603,14 +663,15 @@ class CompanyRecruitmentScreen(QWidget):
             return
         title = self._position_title.text().strip()
         location = self._position_location.text().strip()
-        if not title or not location:
-            self._status.set_status("Tên vị trí và địa điểm là bắt buộc.", "error")
+        if not title:
+            self._status.set_status("Tên vị trí là bắt buộc.", "error")
             return
         args = (
             title,
             self._position_description.toPlainText().strip(),
+            self._position_requirements.toPlainText().strip(),
             location,
-            self._position_type.currentData(),
+            self._position_status.currentData(),
         )
         self._status.set_status("Đang lưu vị trí...", "loading")
         if self._editing_position_id is None:
@@ -636,9 +697,10 @@ class CompanyRecruitmentScreen(QWidget):
         self._position_title.setText(position.title)
         self._position_location.setText(position.location)
         self._position_description.setPlainText(position.description)
-        index = self._position_type.findData(position.employment_type)
+        self._position_requirements.setPlainText(position.requirements)
+        index = self._position_status.findData(position.status)
         if index >= 0:
-            self._position_type.setCurrentIndex(index)
+            self._position_status.setCurrentIndex(index)
         self._position_save.setText("Lưu thay đổi")
         self._tabs.setCurrentWidget(self._positions_tab)
 
@@ -647,7 +709,8 @@ class CompanyRecruitmentScreen(QWidget):
         self._position_title.clear()
         self._position_location.clear()
         self._position_description.clear()
-        self._position_type.setCurrentIndex(0)
+        self._position_requirements.clear()
+        self._position_status.setCurrentIndex(0)
         self._position_save.setText("Tạo vị trí")
         self._positions_table.clearSelection()
 

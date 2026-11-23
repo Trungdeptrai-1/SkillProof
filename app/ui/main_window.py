@@ -61,8 +61,30 @@ class MainWindow(QMainWindow):
         self._company_recruitment: CompanyRecruitmentScreen | None = None
         self._candidate_assessments: CandidateAssessmentScreen | None = None
         self._admin_controller = AdminController()
-        self._company_recruitment_controller = company_recruitment_controller
-        self._candidate_assessment_controller = candidate_assessment_controller
+        if (
+            company_recruitment_controller is None
+            or candidate_assessment_controller is None
+        ):
+            from app.integration.recruitment_adapters import (
+                create_recruitment_view_controllers,
+            )
+
+            default_company_controller, default_candidate_controller = (
+                create_recruitment_view_controllers()
+            )
+        else:
+            default_company_controller = None
+            default_candidate_controller = None
+        self._company_recruitment_controller = (
+            company_recruitment_controller
+            if company_recruitment_controller is not None
+            else default_company_controller
+        )
+        self._candidate_assessment_controller = (
+            candidate_assessment_controller
+            if candidate_assessment_controller is not None
+            else default_candidate_controller
+        )
         self._setup_window()
         self._setup_central_widget()
         self._route_initial()

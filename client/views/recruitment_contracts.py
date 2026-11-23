@@ -27,9 +27,9 @@ class Position:
     id: int
     title: str
     location: str
-    employment_type: str
     status: str
     description: str = ""
+    requirements: str = ""
 
 
 @dataclass(frozen=True)
@@ -63,6 +63,8 @@ class AssessmentResultRow:
     max_score: float | None
     status: str
     submitted_at: str
+    exam_id: int = 0
+    invitation_id: int = 0
 
 
 @dataclass(frozen=True)
@@ -135,7 +137,12 @@ class CompanyRecruitmentController(Protocol):
     def list_positions(self) -> ListResult[Position]: ...
 
     def create_position(
-        self, title: str, description: str, location: str, employment_type: str
+        self,
+        title: str,
+        description: str,
+        requirements: str,
+        location: str,
+        status: str,
     ) -> ActionResult: ...
 
     def update_position(
@@ -143,8 +150,9 @@ class CompanyRecruitmentController(Protocol):
         position_id: int,
         title: str,
         description: str,
+        requirements: str,
         location: str,
-        employment_type: str,
+        status: str,
     ) -> ActionResult: ...
 
     def list_assessments(self) -> ListResult[Assessment]: ...
@@ -164,6 +172,8 @@ class CompanyRecruitmentController(Protocol):
     ) -> ActionResult: ...
 
     def list_results(self) -> ListResult[AssessmentResultRow]: ...
+
+    def release_results(self, exam_id: int) -> ActionResult: ...
 
 
 class CandidateAssessmentController(Protocol):
