@@ -10,19 +10,24 @@ trên máy người dùng bằng `python main.py`.
 |---|---|---|
 | `database/` | Kết nối SQLite, schema và migration | `app/database/connection.py`, `app/database/schema.py` |
 | `models/` | Các đối tượng dữ liệu/DTO | `app/models/user_model.py`; một số model nghiệp vụ hiện khai báo trong `app/services/` |
-| `services/` | Nghiệp vụ ứng dụng và truy cập dữ liệu | `app/services/` |
-| `controllers/` | Điều phối luồng giữa giao diện và services | Hiện chưa có package controller riêng; `app/ui/main_window.py` điều phối màn hình và callback |
+| `services/` | Nghiệp vụ ứng dụng và truy cập dữ liệu | Xác thực, hồ sơ ứng viên, đăng ký: `server/services/` |
+| `controllers/` | Điều phối luồng giữa giao diện và services | Xác thực, hồ sơ ứng viên, đăng ký: `server/controllers/`; điều hướng màn hình vẫn ở `app/ui/main_window.py` |
 
 `main.py` khởi tạo logging, gọi `create_all_tables()` từ `app.database`, sau
-đó tạo `QApplication` và `MainWindow`. Giao diện hiện gọi service trực tiếp
-ở một số màn hình. Các thư mục trong `server/` chỉ là ranh giới kiến trúc và
-điểm đặt mã nguồn trong tương lai; mã hiện tại vẫn nằm trong `app/` và không
-được di chuyển hay sao chép trong nhiệm vụ này.
+đó tạo `QApplication` và `MainWindow`. Các service xác thực, hồ sơ ứng viên,
+đăng ký người dùng và controller tương ứng được triển khai tại `server/`.
+Các module cùng tên trong `app/services/` chỉ re-export các symbol mới để giữ
+tương thích với import hiện hành; không có hai bản triển khai nghiệp vụ.
 
 ## Phạm vi
 
 - Không thêm HTTP listener, API web hay tiến trình server riêng.
 - Không tạo module Python placeholder; thư mục chưa có mã thực thi được giữ
   trong Git bằng `.gitkeep`.
-- Khi triển khai thay đổi tiếp theo, giữ nguyên SQLite, luồng khởi động và
-  hành vi hiện có; bổ sung kiểm thử hồi quy tương ứng.
+- SQLite và luồng khởi động không thay đổi.
+- `LoginScreen`, `RegisterScreen` và `CandidateProfileScreen` hiện vẫn gọi
+  service trực tiếp qua adapter `app/services/`. Tích hợp UI sang
+  `AuthController`, `UserController` và `CandidateProfileController` cần được
+  phối hợp riêng; thay đổi UI nằm ngoài phạm vi triển khai này.
+- Chưa có màn hình hoặc quy tắc phân quyền quản trị danh sách tài khoản, tìm
+  kiếm/lọc hay đổi trạng thái người dùng; các nghiệp vụ đó chưa được thêm.

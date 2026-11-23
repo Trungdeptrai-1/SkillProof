@@ -427,7 +427,7 @@ class TestCVManagement:
         with open(large_path, "wb") as f:
             f.write(b"%PDF-1.4\n")
             f.write(b"\x00" * 100)
-        with patch("app.services.candidate_profile_service.os.path.getsize", return_value=MAX_CV_SIZE + 1):
+        with patch("server.services.candidate_profile_service.os.path.getsize", return_value=MAX_CV_SIZE + 1):
             r = candidate_session.save_cv(large_path)
         assert not r.success
         assert r.status == CandidateProfileResult.CV_TOO_LARGE
@@ -497,7 +497,7 @@ class TestDBError:
         auth = AuthService()
         auth.login("candE@sp.local", pw)
         svc = CandidateProfileService()
-        with patch("app.services.candidate_profile_service.db") as mock_db:
+        with patch("server.services.candidate_profile_service.db") as mock_db:
             mock_db.fetchone.side_effect = sqlite3.OperationalError("gone")
             r = svc.get_profile()
         assert r.status == CandidateProfileResult.DB_ERROR
