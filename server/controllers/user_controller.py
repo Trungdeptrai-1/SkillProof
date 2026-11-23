@@ -1,15 +1,19 @@
-"""Controller for user registration."""
+"""Controller for user registration requests."""
 
 from __future__ import annotations
 
-from app.services.user_service import RegisterResult, UserService
+from server.services.user_service import (
+    RegisterResult,
+    UserService,
+    user_service,
+)
 
 
 class UserController:
-    """Forward registration requests from views to the user service."""
+    """Validate registration request types and delegate to the user service."""
 
     def __init__(self, service: UserService | None = None) -> None:
-        self._service = service if service is not None else UserService()
+        self._service = service if service is not None else user_service
 
     def register(
         self,
@@ -18,7 +22,14 @@ class UserController:
         password: str,
         confirm_password: str,
     ) -> RegisterResult:
-        return self._service.register(full_name, email, password, confirm_password)
+        if not all(
+            isinstance(value, str)
+            for value in (full_name, email, password, confirm_password)
+        ):
+            return RegisterResult(RegisterResult.INVALID_INPUT)
+        return self._service.register(
+            full_name, email, password, confirm_password
+        )
 
 
 user_controller = UserController()
