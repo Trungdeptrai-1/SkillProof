@@ -10,19 +10,21 @@ trên máy người dùng bằng `python main.py`.
 |---|---|---|
 | `database/` | Kết nối SQLite, schema và migration | `app/database/connection.py`, `app/database/schema.py` |
 | `models/` | Các đối tượng dữ liệu/DTO | `app/models/user_model.py`; một số model nghiệp vụ hiện khai báo trong `app/services/` |
-| `services/` | Nghiệp vụ ứng dụng và truy cập dữ liệu | `app/services/` |
-| `controllers/` | Điều phối luồng giữa giao diện và services | Hiện chưa có package controller riêng; `app/ui/main_window.py` điều phối màn hình và callback |
+| `services/` | Nghiệp vụ ứng dụng và truy cập dữ liệu | Xác thực: `server/services/auth_service.py`; các nghiệp vụ khác hiện ở `app/services/` |
+| `controllers/` | Điều phối luồng giữa giao diện và services | Xác thực: `server/controllers/auth_controller.py`; điều hướng màn hình vẫn ở `app/ui/main_window.py` |
 
 `main.py` khởi tạo logging, gọi `create_all_tables()` từ `app.database`, sau
-đó tạo `QApplication` và `MainWindow`. Giao diện hiện gọi service trực tiếp
-ở một số màn hình. Các thư mục trong `server/` chỉ là ranh giới kiến trúc và
-điểm đặt mã nguồn trong tương lai; mã hiện tại vẫn nằm trong `app/` và không
-được di chuyển hay sao chép trong nhiệm vụ này.
+đó tạo `QApplication` và `MainWindow`. `AuthService` cùng `AuthController` đã
+được triển khai cho luồng xác thực. `app/services/auth_service.py` chỉ re-export
+các symbol từ service mới để giữ tương thích với các import hiện hành; không
+có hai bản triển khai nghiệp vụ.
 
 ## Phạm vi
 
 - Không thêm HTTP listener, API web hay tiến trình server riêng.
 - Không tạo module Python placeholder; thư mục chưa có mã thực thi được giữ
   trong Git bằng `.gitkeep`.
-- Khi triển khai thay đổi tiếp theo, giữ nguyên SQLite, luồng khởi động và
-  hành vi hiện có; bổ sung kiểm thử hồi quy tương ứng.
+- SQLite và luồng khởi động không thay đổi.
+- `LoginScreen` hiện vẫn gọi `app.services.auth_service.auth_service` trực tiếp.
+  Khi tích hợp controller, UI cần được phối hợp để gọi `AuthController.login()`;
+  thay đổi UI nằm ngoài phạm vi triển khai này.
