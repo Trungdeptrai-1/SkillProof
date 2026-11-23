@@ -28,7 +28,8 @@ from app.utils.constants import (
     WELCOME_WIDTH, WELCOME_HEIGHT,
 )
 from app.utils.styles import primary_button_style
-from app.services.auth_service import auth_service, LoginResult
+from server.controllers.auth_controller import auth_controller
+from server.services.auth_service import LoginResult
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -345,8 +346,8 @@ class _LoginFormPanel(QWidget):
         self._login_btn.setEnabled(False)
         self._login_btn.setText("Đang xử lý...")
 
-        # Gọi service
-        result = auth_service.login(email, password)
+        # Gọi controller xác thực
+        result = auth_controller.login(email, password)
 
         # Re-enable nút
         self._login_btn.setEnabled(True)

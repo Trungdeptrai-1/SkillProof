@@ -28,78 +28,83 @@
 SkillProof_New/
 ├── main.py                         # Logging, schema, QApplication, MainWindow
 ├── server/
-│   ├── controllers/                # Điều phối View ↔ Service
-│   ├── services/                   # AuthService, AdminSetupService
-│   ├── database/                   # Ranh giới dự kiến; runtime hiện ở app/database
-│   └── models/                     # Ranh giới dự kiến; UserModel hiện ở app/models
-├── client/                         # Ranh giới desktop; runtime PySide6 hiện ở app/ui
-│   ├── views/
-│   ├── components/
+│   ├── controllers/                # Auth, user, profile, setup, collaboration
+│   ├── services/                   # Auth, registration, setup, Candidate profile
+│   ├── database/                   # SQLite connection, schema, migrations
+│   └── models/                     # UserModel
+├── client/
+│   ├── views/                       # Welcome, auth, dashboard, Candidate profile
+│   ├── components/                  # PySide6 widgets dùng lại
 │   └── assets/
 ├── app/
-│   ├── database/                   # SQLite connection, DDL, migrations MIG-001..005
-│   ├── models/                     # UserModel
-│   ├── services/                   # User, Candidate, Company, Expert, Contract, Task
-│   ├── ui/                         # MainWindow, screens, widgets, dialogs
+│   ├── database/                   # Compatibility imports
+│   ├── models/                     # Compatibility imports / domain DTO
+│   ├── services/                   # Một số nghiệp vụ legacy còn hoạt động
+│   ├── ui/                         # MainWindow và các màn hình nghiệp vụ khác
 │   └── utils/                      # Constants, styles, hashing, helpers
 ├── assets/                         # Tài nguyên giao diện hiện có
 ├── docs/                           # Phân công thành viên và hướng dẫn CI
 └── tests/                          # Service, migration và MVC integration tests
 ```
 
-`server/` và `client/` là ranh giới kiến trúc của ứng dụng desktop, không phải
-web server/client. Mã giao diện đang chạy vẫn ở `app/ui/`; không có mã nào
-được di chuyển sang `client/`. SQLite và phần lớn nghiệp vụ vẫn nằm trong
-`app/` để giữ tương thích. Các DTO hồ sơ/hợp đồng/nhiệm vụ hiện còn được khai
-báo trong service tương ứng; `UserModel` nằm trong `app/models/`.
+SkillProof là desktop app chạy một tiến trình. `server/` là tầng dữ liệu,
+nghiệp vụ và điều phối, không phải web server; `client/` là UI PySide6. Các
+màn hình đăng nhập, đăng ký, welcome, dashboard và Candidate profile đang chạy
+từ `client/views/`. `MainWindow`, setup lần đầu, profile Company/Expert và các
+màn hình tìm kiếm/hợp đồng/nhiệm vụ vẫn ở `app/ui/`. Các module legacy dưới
+`app/` được giữ để tương thích import; không tạo bản sao nghiệp vụ.
 
 ### 2.1 Trách nhiệm và luồng dữ liệu
 
 ```
-main.py → SQLite schema/migrations → QApplication → app.ui.MainWindow/Views
-                                              ↓
-                                      server/controllers
-                                              ↓
-                             server/services / app/services
-                                    ↓                 ↓
-                              app/models        app/database → SQLite
+main.py → app.database compatibility → server.database → SQLite
+   └── QApplication → app.ui.MainWindow → client/app Views
+                                         → server.controllers
+                                         → server.services / app.services
+                                         → server.models / DTO → SQLite
 ```
 
 View hiển thị dữ liệu, gửi thao tác qua controller và hiển thị `Result`/Model
 được trả về. Controller điều phối, không lặp lại nghiệp vụ. Service chịu
-trách nhiệm xác thực dữ liệu, phân quyền theo session, nghiệp vụ và truy cập
-dữ liệu. Database hiện vẫn do `app/database/` quản lý. Import cũ
-`app.services.auth_service` được giữ dưới dạng re-export tới service xác thực
-canonical trong `server/services/auth_service.py`.
+trách nhiệm xác thực dữ liệu, quyền theo session, nghiệp vụ và truy cập dữ
+liệu. `server/database/` là SQLite implementation; các import cũ dưới `app/`
+được giữ tương thích. `MainWindow` là nơi điều phối navigation, không chứa
+nghiệp vụ tài khoản hay hồ sơ.
 
 ### 2.2 Luồng MVC đã nối
 
 | Luồng | View | Controller | Service / Model |
 |---|---|---|---|
-| First-run Admin | `FirstRunScreen` | `SetupController` | `AdminSetupService`; đăng nhập dùng `AuthService` |
-| Đăng ký Candidate | `RegisterScreen` | `UserController` | `UserService`, `UserModel` |
-| Login / Logout | `LoginScreen`, Dashboard, `MainWindow` | `AuthController` | `AuthService`, `SessionManager`, `UserModel` |
-| Hồ sơ Candidate / Company / Expert | Các profile screens | Các profile controllers | Profile services và DTO hiện có |
-| Tìm chuyên gia, hợp đồng, nhiệm vụ | Search/Contract/Task screens | Collaboration controllers | Search/Contract/Task services và DTO hiện có |
+| Thiết lập Admin lần đầu | `FirstRunScreen` | `SetupController` | `AdminSetupService`, SQLite |
+| Đăng ký Candidate | `client.views.RegisterScreen` | `UserController` | `UserService`, `UserModel` |
+| Login / Logout | `client.views.LoginScreen`, Dashboard | `AuthController` | `AuthService`, `SessionManager`, `UserModel` |
+| Hồ sơ Candidate | `client.views.CandidateProfileScreen` | `CandidateProfileController` | Candidate profile service/DTO |
+| Hồ sơ Company / Expert | Profile screens trong `app/ui/screens/` | `CompanyProfileController`, `ExpertProfileController` | Profile services/DTO |
+| Tìm chuyên gia, hợp đồng, nhiệm vụ | Search/Contract/Task screens | Collaboration controllers | Search/Contract/Task services/DTO |
+| Điều hướng | `MainWindow` + dashboard callbacks | `MainWindow` điều phối màn hình | Không chứa nghiệp vụ domain |
 
-Admin hiện có thiết lập tài khoản lần đầu và dashboard theo role; chưa có
-module quản trị users/skills/settings để tích hợp. Các menu dashboard vẫn là
-placeholder. `client/views`, `client/components`, `client/assets` và
-`server/database`, `server/models` hiện là ranh giới thư mục, chưa phải các
-package runtime riêng.
+Dashboard Candidate, Company và Expert mở được màn hình hồ sơ đã có. Những
+menu Admin (quản lý người dùng/kỹ năng/cài đặt), cùng các mục nghiệp vụ chưa
+có màn hình hoặc service tương ứng, vẫn là placeholder; không giả định đã
+triển khai.
 
 ### 2.3 Phân công bốn thành viên
 
 - **Nguyễn Quốc Trung (`Trungdeptrai-1`)** — tích hợp MVC, điều phối PR và
   kiểm thử tích hợp; nhánh `feature/mvc-integration-trung`.
 - **Đinh Xuân Phát (`dinhxuanphat909-crypto`)** — database/model/migration;
-  phần thực thi hiện ở `app/database/` và `app/models/`.
+  phụ trách `server/database/`, `server/models/` và tương thích SQLite.
 - **Huỳnh Ngọc Dũng (`huynhdung123`)** — controller/service/phân quyền;
-  controllers mới ở `server/controllers/`, cùng services hiện có trong `app/`.
+  phụ trách `server/controllers/`, `server/services/` và các luồng domain.
 - **Nguyễn Thị Thu Thảo (`thao2351220224-cmd`)** — giao diện PySide6; mã chạy
-  hiện ở `app/ui/`, tài nguyên ở `assets/`.
+  phụ trách `client/views/`, `client/components/`, `client/assets/`; một số
+  màn hình legacy vẫn ở `app/ui/`.
 
 Chi tiết nhánh, nghiệm thu và PR riêng xem [docs/TEAM_ASSIGNMENTS.md](docs/TEAM_ASSIGNMENTS.md).
+
+Chạy ứng dụng bằng `python main.py`; chạy toàn bộ tests bằng
+`python -m pytest -q`; kiểm tra cú pháp bằng
+`python -m compileall -q app client server tests main.py`.
 
 ## 3. Nguyên tắc thiết kế
 
@@ -273,42 +278,26 @@ if callable(self.on_action):
 
 > **Lý do:** Đơn giản hơn cho giai đoạn đầu. Có thể chuyển sang Signal/Slot ở giai đoạn sau khi cần type-safety.
 
-### 6.3 Luồng điều hướng thực tế (Giai đoạn 01)
+### 6.3 Luồng điều hướng hiện tại
 
 ```
-WelcomeScreen
-    │
-    ├── [Bắt đầu] ──────────────────────────► LoginScreen
-    │                                              │
-    │                                   [Đăng nhập thành công]
-    │                                              │
-    │                        ┌─────────────────────┴─────────────────────┐
-    │                        ▼ (theo role từ DB)                          │
-    │               DashboardScreen(user)                          [Quay lại]
-    │               (sidebar + content placeholder)                       │
-    │                        │                                            │
-    │                   [Đăng xuất]                                       │
-    │                        └──────────────────────────────► LoginScreen ◄┘
-    │
-    └── [Tìm hiểu thêm] → QMessageBox
+Welcome → Login → Dashboard(user)
+                     ├── Candidate → Candidate profile ──┐
+                     ├── Company   → Company profile ────┤→ Dashboard
+                     ├── Expert    → Expert profile ─────┘
+                     └── Logout → AuthController.logout() → Login
 ```
 
-**Cơ chế tạo/hủy Dashboard:**
-- Mỗi lần đăng nhập tạo `DashboardScreen` mới với `user` hiện tại.
-- Dashboard cũ bị xóa bằng `removeWidget()` + `deleteLater()` trước khi tạo mới.
-- `LoginScreen` được tạo một lần, `reset()` khi hiển thị lại.
+`MainWindow` điều phối bằng `QStackedWidget` và callback. Mỗi lần đăng nhập
+tạo Dashboard mới; Dashboard cũ bị xoá trước khi thay thế. Logout kết thúc
+session qua `AuthController` trước khi điều hướng về Login. Login screen được
+tái sử dụng và reset khi hiển thị lại.
 
-### 6.4 Lộ trình màn hình dự kiến
+### 6.4 Màn hình chưa triển khai
 
-```
-WelcomeScreen
-    └── [Bắt đầu] → LoginScreen
-                        ├── [admin]      → AdminDashboard
-                        ├── [instructor] → InstructorDashboard
-                        ├── [candidate]  → CandidateDashboard
-                        ├── [company]    → CompanyDashboard
-                        └── [expert]     → ExpertDashboard
-```
+Các menu Dashboard về quản lý Admin, kỹ năng, chứng chỉ, tuyển dụng, báo cáo,
+khoá học và tiến độ học tập vẫn là placeholder nếu chưa có màn hình/service
+tương ứng. Không được xem các mục này là chức năng đã hoàn thành.
 
 ---
 
@@ -337,7 +326,7 @@ WelcomeScreen
 ### 7.3 Cấu trúc một Screen mới
 
 ```python
-# app/ui/screens/example_screen.py
+# client/views/example_screen.py
 from __future__ import annotations
 from PySide6.QtWidgets import QWidget, QVBoxLayout
 from app.utils.constants import COLOR_OFF_WHITE
@@ -472,7 +461,7 @@ create_all_tables()
 ### Giai đoạn 01 — Xác thực người dùng ✅ HOÀN THÀNH
 - [x] UserModel DTO, AuthService, SessionManager
 - [x] LoginScreen 2-panel, toggle password
-- [x] DashboardScreen placeholder 6 roles
+- [x] Dashboard theo 6 roles; navigation hồ sơ Candidate/Company/Expert
 - [x] Navigation Welcome→Login→Dashboard→Logout
 
 ### Giai đoạn 01.1 — Ổn định xác thực ✅ HOÀN THÀNH
@@ -577,8 +566,8 @@ login(email, password)
 migrations MIG-001..MIG-005 và các luồng tích hợp MVC. `tests/conftest.py`
 dùng database SQLite tạm cho từng test; không dùng `data/skillproof.db`.
 
-**Chạy đầy đủ:** `python -m pytest tests/ -v`
-**Kiểm tra cú pháp:** `python -m compileall -q app server tests main.py`
+**Chạy đầy đủ:** `python -m pytest -q`
+**Kiểm tra cú pháp:** `python -m compileall -q app client server tests main.py`
 
 ---
 

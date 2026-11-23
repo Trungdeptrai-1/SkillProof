@@ -33,10 +33,12 @@ from app.utils.constants import (
     WINDOW_MIN_WIDTH, WINDOW_MIN_HEIGHT,
 )
 from app.utils.styles import primary_button_style, secondary_button_style
-from app.services.candidate_profile_service import (
-    CandidateProfileService, CandidateProfileResult, CandidateProfileModel,
-)
+from server.controllers.candidate_profile_controller import CandidateProfileController
 from app.services.auth_service import SessionManager
+from server.services.candidate_profile_service import (
+    CandidateProfileModel,
+    CandidateProfileResult,
+)
 
 
 class CandidateProfileScreen(QWidget):
@@ -51,7 +53,7 @@ class CandidateProfileScreen(QWidget):
         super().__init__(parent)
         self.setMinimumSize(WINDOW_MIN_WIDTH, WINDOW_MIN_HEIGHT)
         self._on_back_cb = None
-        self._svc = CandidateProfileService()
+        self._svc = CandidateProfileController()
         self._profile: CandidateProfileModel | None = None
         self._is_editing = False
         self._setup_ui()

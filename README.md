@@ -85,28 +85,32 @@ CI also runs syntax checks and the full pytest suite for pull requests to
 ## Kiến trúc MVC hiện tại
 
 SkillProof là ứng dụng desktop một tiến trình. `server/` là tầng ứng dụng và
-dữ liệu, **không** phải web server; `client/` đại diện cho UI PySide6. Các
-thư mục mới xác lập ranh giới kiến trúc, trong khi mã runtime hiện vẫn giữ ở
-`app/` để tương thích.
+dữ liệu, **không** phải web server; `client/` là giao diện PySide6. Một số
+màn hình và service tương thích cũ vẫn ở `app/`, còn luồng xác thực, đăng ký,
+dashboard và hồ sơ Candidate dùng các module canonical trong `client/` và
+`server/`.
 
 ```text
-main.py → SQLite schema → QApplication/MainWindow → View
-                                              → Controller
-                                              → Service
-                                              → Model/SQLite
+main.py → MainWindow → View (client/views or app/ui/screens)
+                         → Controller (server/controllers)
+                         → Service (server/services or app/services)
+                         → Model / Database → SQLite
 ```
 
-- **View:** `app/ui/` và tài nguyên `assets/`; màn hình gửi thao tác qua
-  `server/controllers/`.
-- **Controller:** điều phối xác thực/đăng ký, thiết lập Admin, hồ sơ, tìm
-  chuyên gia, hợp đồng và nhiệm vụ; không lặp lại nghiệp vụ.
-- **Service:** xác thực và thiết lập Admin ở `server/services/`; các
-  user/profile/search/contract/task services hiện ở `app/services/`. Service
-  chịu trách nhiệm nghiệp vụ, phân quyền và truy cập dữ liệu.
-- **Model/database:** `UserModel` ở `app/models/`; DTO nghiệp vụ khác còn nằm
-  trong service. SQLite, schema và migrations ở `app/database/`.
-- `client/views`, `client/components`, `client/assets`, `server/models` và
-  `server/database` hiện là ranh giới thư mục, chưa phải package runtime riêng.
+- **View:** `client/views/` chứa welcome, login, registration, dashboard và
+  Candidate profile; Company/Expert profile, tìm kiếm, hợp đồng, nhiệm vụ và
+  thiết lập lần đầu vẫn ở `app/ui/screens/`. `MainWindow` ở `app/ui/` điều phối
+  navigation.
+- **Controller:** `server/controllers/` điều phối xác thực, đăng ký, setup,
+  profile, tìm chuyên gia, hợp đồng và nhiệm vụ.
+- **Service:** Auth, user registration, setup và Candidate profile ở
+  `server/services/`; một số profile/search/collaboration services còn ở
+  `app/services/` và được gọi qua controllers.
+- **Model/database:** model người dùng ở `server/models/`; SQLite connection,
+  schema và migration ở `server/database/`. Các import cũ trong `app/` được
+  giữ làm compatibility wrappers.
+- Các mục nghiệp vụ Admin chưa có implementation vẫn là placeholder; dashboard
+  Company/Expert có thể mở các màn hình hồ sơ đã tồn tại.
 
 | Thành viên | Phạm vi |
 |---|---|
@@ -130,29 +134,25 @@ SkillProof_New/
 │
 ├── server/                     # Tầng ứng dụng/dữ liệu (không phải web server)
 │   ├── controllers/            # Điều phối View ↔ Service
-│   ├── services/               # Auth và first-run setup
-│   ├── models/                 # Ranh giới kiến trúc; runtime hiện ở app/models
-│   └── database/               # Ranh giới kiến trúc; runtime hiện ở app/database
-├── client/                     # Ranh giới UI desktop; runtime hiện ở app/ui
-│   ├── views/
-│   ├── components/
+│   ├── services/               # Auth, registration, setup, Candidate profile
+│   ├── models/                 # UserModel
+│   └── database/               # SQLite, schema và migrations
+├── client/                     # PySide6 desktop views
+│   ├── views/                  # Welcome, auth, dashboard, Candidate profile
+│   ├── components/             # Widget dùng lại
 │   └── assets/
 ├── docs/                       # Team assignments, CI guide
 │
-├── app/                        # Package ứng dụng
+├── app/                        # Compatibility modules và màn hình nghiệp vụ khác
 │   ├── ui/
-│   │   ├── screens/            # Các màn hình chính
-│   │   │   └── welcome_screen.py
+│   │   ├── screens/            # Profile, collaboration, setup và wrappers
 │   │   ├── components/         # Widget tái sử dụng
 │   │   ├── dialogs/            # Hộp thoại
 │   │   └── main_window.py      # Cửa sổ chính
 │   │
-│   ├── database/
-│   │   ├── connection.py       # Singleton kết nối SQLite
-│   │   └── schema.py           # DDL & seed data
-│   │
-│   ├── models/                 # Data model / business objects
-│   ├── services/               # Business logic layer
+│   ├── database/               # Compatibility imports
+│   ├── models/                 # Compatibility imports / domain DTO
+│   ├── services/               # Nghiệp vụ cũ chưa chuyển
 │   └── utils/
 │       ├── constants.py        # Hằng số toàn cục
 │       ├── styles.py           # Qt Stylesheets
