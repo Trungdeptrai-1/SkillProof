@@ -9,7 +9,7 @@ người dùng bằng `python main.py`.
 | Thư mục | Trách nhiệm | Mã nguồn hiện dùng |
 |---|---|---|
 | `database/` | Kết nối SQLite, schema và migration | `server/database/`; các import cũ trong `app/database/` được giữ tương thích |
-| `models/` | Đối tượng dữ liệu và DTO | `server/models/` và một số model nghiệp vụ trong services cũ |
+| `models/` | Đối tượng dữ liệu và DTO | `UserModel`, `SkillModel`, `AppSettingModel`, `AdminStatisticsModel` trong `server/models/` |
 | `services/` | Nghiệp vụ ứng dụng và truy cập dữ liệu | Xác thực, đăng ký, thiết lập Admin và hồ sơ Candidate ở `server/services/`; một số nghiệp vụ hồ sơ Company/Expert, tìm kiếm, hợp đồng và nhiệm vụ vẫn ở `app/services/` |
 | `controllers/` | Điều phối yêu cầu từ View tới service | `server/controllers/` gồm auth, user, setup, profile và collaboration |
 
@@ -27,3 +27,16 @@ những bản triển khai nghiệp vụ song song.
   là placeholder.
 - Chạy kiểm thử bằng `python -m pytest -q`; kiểm tra cú pháp bằng
   `python -m compileall -q app client server tests`.
+
+## Admin data models
+
+- `UserModel` maps the existing `users` table, including `is_active` and the
+  MIG-005 `is_deleted` soft-delete flag. Legacy rows without that column map
+  to `is_deleted=False`; passwords are never part of the model.
+- `SkillModel` maps `skills`; `AppSettingModel` maps the existing key/value
+  `app_settings` table.
+- `AdminStatisticsModel.from_row()` maps aggregate aliases for user, skill,
+  certificate, course, enrollment, and assessment counts. Active/inactive
+  user counts exclude soft-deleted users; total users includes them.
+- These tables and fields already exist. No new schema migration is required;
+  MIG-005 upgrades older databases with `users.is_deleted`.
