@@ -55,6 +55,9 @@ data/logs/
 _*.py
 _*.ps1
 _*.txt
+!server/__init__.py
+!server/database/__init__.py
+!server/models/__init__.py
 
 # ── Build / Distribution ─────────────────────────────────────────────────────
 build/
