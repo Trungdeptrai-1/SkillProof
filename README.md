@@ -77,6 +77,52 @@ python -m pytest tests/ -q
 
 ---
 
+CI also runs syntax checks and the full pytest suite for pull requests to
+`main` and pushes to `main`. See [docs/CI_GUIDE.md](docs/CI_GUIDE.md).
+
+---
+
+## Kiến trúc MVC hiện tại
+
+SkillProof là ứng dụng desktop một tiến trình. `server/` là tầng ứng dụng và
+dữ liệu, **không** phải web server; `client/` là giao diện PySide6. Một số
+màn hình và service tương thích cũ vẫn ở `app/`, còn luồng xác thực, đăng ký,
+dashboard và hồ sơ Candidate dùng các module canonical trong `client/` và
+`server/`.
+
+```text
+main.py → MainWindow → View (client/views or app/ui/screens)
+                         → Controller (server/controllers)
+                         → Service (server/services or app/services)
+                         → Model / Database → SQLite
+```
+
+- **View:** `client/views/` chứa welcome, login, registration, dashboard và
+  Candidate profile; Company/Expert profile, tìm kiếm, hợp đồng, nhiệm vụ và
+  thiết lập lần đầu vẫn ở `app/ui/screens/`. `MainWindow` ở `app/ui/` điều phối
+  navigation.
+- **Controller:** `server/controllers/` điều phối xác thực, đăng ký, setup,
+  profile, tìm chuyên gia, hợp đồng và nhiệm vụ.
+- **Service:** Auth, user registration, setup và Candidate profile ở
+  `server/services/`; một số profile/search/collaboration services còn ở
+  `app/services/` và được gọi qua controllers.
+- **Model/database:** model người dùng ở `server/models/`; SQLite connection,
+  schema và migration ở `server/database/`. Các import cũ trong `app/` được
+  giữ làm compatibility wrappers.
+- Các mục nghiệp vụ Admin chưa có implementation vẫn là placeholder; dashboard
+  Company/Expert có thể mở các màn hình hồ sơ đã tồn tại.
+
+| Thành viên | Phạm vi |
+|---|---|
+| Nguyễn Quốc Trung (`Trungdeptrai-1`) | Tích hợp MVC, điều phối PR, kiểm thử tích hợp |
+| Đinh Xuân Phát (`dinhxuanphat909-crypto`) | Database, Model, Migration |
+| Huỳnh Ngọc Dũng (`huynhdung123`) | Controller, Services, phân quyền |
+| Nguyễn Thị Thu Thảo (`thao2351220224-cmd`) | Giao diện PySide6 |
+
+Chi tiết nhánh, nhiệm vụ và nghiệm thu: [docs/TEAM_ASSIGNMENTS.md](docs/TEAM_ASSIGNMENTS.md).
+
+---
+
 ## Cấu trúc dự án
 
 ```
@@ -86,20 +132,27 @@ SkillProof_New/
 ├── README.md
 ├── .gitignore
 │
-├── app/                        # Package ứng dụng
+├── server/                     # Tầng ứng dụng/dữ liệu (không phải web server)
+│   ├── controllers/            # Điều phối View ↔ Service
+│   ├── services/               # Auth, registration, setup, Candidate profile
+│   ├── models/                 # UserModel
+│   └── database/               # SQLite, schema và migrations
+├── client/                     # PySide6 desktop views
+│   ├── views/                  # Welcome, auth, dashboard, Candidate profile
+│   ├── components/             # Widget dùng lại
+│   └── assets/
+├── docs/                       # Team assignments, CI guide
+│
+├── app/                        # Compatibility modules và màn hình nghiệp vụ khác
 │   ├── ui/
-│   │   ├── screens/            # Các màn hình chính
-│   │   │   └── welcome_screen.py
+│   │   ├── screens/            # Profile, collaboration, setup và wrappers
 │   │   ├── components/         # Widget tái sử dụng
 │   │   ├── dialogs/            # Hộp thoại
 │   │   └── main_window.py      # Cửa sổ chính
 │   │
-│   ├── database/
-│   │   ├── connection.py       # Singleton kết nối SQLite
-│   │   └── schema.py           # DDL & seed data
-│   │
-│   ├── models/                 # Data model / business objects
-│   ├── services/               # Business logic layer
+│   ├── database/               # Compatibility imports
+│   ├── models/                 # Compatibility imports / domain DTO
+│   ├── services/               # Nghiệp vụ cũ chưa chuyển
 │   └── utils/
 │       ├── constants.py        # Hằng số toàn cục
 │       ├── styles.py           # Qt Stylesheets
@@ -151,7 +204,7 @@ SkillProof_New/
 - [x] Màn hình đăng nhập / đăng xuất (Giai đoạn 01)
 - [x] First-Run Admin Setup — không hardcode mật khẩu (Giai đoạn 01.1)
 - [x] PBKDF2-SHA256 per-user salt, lazy migration hash cũ (Giai đoạn 01.1)
-- [x] Test suite tự động: 133 tests — auth, session, migration, regression (Giai đoạn 01.1)
+- [x] Test suite tự động — auth, session, migration, nghiệp vụ và MVC regression
 - [ ] Dashboard người dùng theo role
 - [ ] Quản lý kỹ năng
 - [ ] Quản lý chứng chỉ

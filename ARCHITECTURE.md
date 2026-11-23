@@ -1,8 +1,8 @@
 # SkillProof — Tài liệu Kiến trúc
 
-> **Phiên bản:** 1.2.0 — Giai đoạn 01.1  
-> **Cập nhật:** 2026-11-08  
-> **Trạng thái:** Xác thực ổn định, PBKDF2 per-user salt, first-run setup, 133 tests PASS
+> **Phiên bản:** 1.3.0 — Tích hợp MVC
+> **Cập nhật:** 2026-11-23
+> **Trạng thái:** Desktop MVC; SQLite, xác thực, hồ sơ và luồng hợp tác được điều phối qua controllers
 
 ---
 
@@ -22,91 +22,98 @@
 
 ---
 
-## 2. Cấu trúc thư mục thực tế
+## 2. Mô hình MVC và cấu trúc thực tế
 
 ```
 SkillProof_New/
-├── main.py                         ✅ Điểm vào
-├── requirements.txt                ✅ PySide6 + pytest
-├── README.md                       ✅ Cập nhật Giai đoạn 01.1
-├── ARCHITECTURE.md                 ✅ Tài liệu này
-├── pytest.ini                      ✅ Cấu hình test suite
-├── git_setup.ps1                   (có thể xóa)
-├── .gitignore
-│
+├── main.py                         # Logging, schema, QApplication, MainWindow
+├── server/
+│   ├── controllers/                # Auth, user, profile, setup, collaboration
+│   ├── services/                   # Auth, registration, setup, Candidate profile
+│   ├── database/                   # SQLite connection, schema, migrations
+│   └── models/                     # UserModel
+├── client/
+│   ├── views/                       # Welcome, auth, dashboard, Candidate profile
+│   ├── components/                  # PySide6 widgets dùng lại
+│   └── assets/
 ├── app/
-│   ├── database/
-│   │   ├── __init__.py
-│   │   ├── connection.py           ✅ Singleton, WAL, FK ON
-│   │   └── schema.py               ✅ DDL + MIG-001/002/003, is_first_run()
-│   │
-│   ├── models/
-│   │   ├── __init__.py
-│   │   └── user_model.py           ✅ UserModel DTO, không có field password
-│   │
-│   ├── services/
-│   │   ├── __init__.py
-│   │   └── auth_service.py         ✅ PBKDF2 verify, dummy hash, lazy rehash
-│   │
-│   ├── ui/
-│   │   ├── main_window.py          ✅ route_initial → FirstRun/Welcome
-│   │   └── screens/
-│   │       ├── welcome_screen.py   ✅ Màn hình chào mừng
-│   │       ├── login_screen.py     ✅ Đăng nhập
-│   │       ├── first_run_screen.py ✅ Thiết lập admin lần đầu (Giai đoạn 01.1)
-│   │       └── dashboard_screen.py ✅ Placeholder 6 roles
-│   │
-│   └── utils/
-│       ├── constants.py            ✅ Design tokens
-│       ├── styles.py               ✅ QSS tập trung
-│       └── helpers.py              ✅ PBKDF2-SHA256, backward compat legacy
-│
-├── tests/                          ✅ 133 tests PASS (Giai đoạn 01.1)
-│   ├── conftest.py                 # Fixtures: fresh_db, legacy_db, auth, session_mgr
-│   ├── test_auth_service.py        # 40 tests: login, logout, session, roles, injection
-│   ├── test_migration.py           # 25 tests: MIG-001/002/003, rollback, FK
-│   ├── test_password_hashing.py    # 17 tests: PBKDF2, backward compat, timing
-│   ├── test_session.py             # 9 tests: SessionManager singleton, states
-│   └── test_regression_phase00_01.py # 42 tests: regression full stack
-│
-├── assets/icons/ & images/         (chưa có file)
-└── data/                           🔒 KHÔNG commit Git
-    ├── skillproof.db
-    └── logs/
+│   ├── database/                   # Compatibility imports
+│   ├── models/                     # Compatibility imports / domain DTO
+│   ├── services/                   # Một số nghiệp vụ legacy còn hoạt động
+│   ├── ui/                         # MainWindow và các màn hình nghiệp vụ khác
+│   └── utils/                      # Constants, styles, hashing, helpers
+├── assets/                         # Tài nguyên giao diện hiện có
+├── docs/                           # Phân công thành viên và hướng dẫn CI
+└── tests/                          # Service, migration và MVC integration tests
 ```
 
----
+SkillProof là desktop app chạy một tiến trình. `server/` là tầng dữ liệu,
+nghiệp vụ và điều phối, không phải web server; `client/` là UI PySide6. Các
+màn hình đăng nhập, đăng ký, welcome, dashboard và Candidate profile đang chạy
+từ `client/views/`. `MainWindow`, setup lần đầu, profile Company/Expert và các
+màn hình tìm kiếm/hợp đồng/nhiệm vụ vẫn ở `app/ui/`. Các module legacy dưới
+`app/` được giữ để tương thích import; không tạo bản sao nghiệp vụ.
 
-## 3. Kiến trúc phân tầng
+### 2.1 Trách nhiệm và luồng dữ liệu
 
 ```
-┌─────────────────────────────────────────────────────┐
-│                  PRESENTATION LAYER                  │
-│  main_window.py  │  screens/  │  components/        │
-│  welcome_screen  │  login_screen  │  dashboard_screen│
-│  (QStackedWidget navigation — Welcome→Login→Dashboard│
-├─────────────────────────────────────────────────────┤
-│                  BUSINESS LOGIC LAYER                │
-│  services/auth_service.py                           │
-│  AuthService · SessionManager · LoginResult         │
-├─────────────────────────────────────────────────────┤
-│                  DATA ACCESS LAYER                   │
-│  models/user_model.py  (UserModel DTO)              │
-│  database/connection.py  +  schema.py               │
-├─────────────────────────────────────────────────────┤
-│                  INFRASTRUCTURE                      │
-│  utils/constants.py  │  utils/styles.py             │
-│  utils/helpers.py    │  SQLite WAL                  │
-└─────────────────────────────────────────────────────┘
+main.py → app.database compatibility → server.database → SQLite
+   └── QApplication → app.ui.MainWindow → client/app Views
+                                         → server.controllers
+                                         → server.services / app.services
+                                         → server.models / DTO → SQLite
 ```
 
-### 3.1 Nguyên tắc thiết kế
+View hiển thị dữ liệu, gửi thao tác qua controller và hiển thị `Result`/Model
+được trả về. Controller điều phối, không lặp lại nghiệp vụ. Service chịu
+trách nhiệm xác thực dữ liệu, quyền theo session, nghiệp vụ và truy cập dữ
+liệu. `server/database/` là SQLite implementation; các import cũ dưới `app/`
+được giữ tương thích. `MainWindow` là nơi điều phối navigation, không chứa
+nghiệp vụ tài khoản hay hồ sơ.
+
+### 2.2 Luồng MVC đã nối
+
+| Luồng | View | Controller | Service / Model |
+|---|---|---|---|
+| Thiết lập Admin lần đầu | `FirstRunScreen` | `SetupController` | `AdminSetupService`, SQLite |
+| Đăng ký Candidate | `client.views.RegisterScreen` | `UserController` | `UserService`, `UserModel` |
+| Login / Logout | `client.views.LoginScreen`, Dashboard | `AuthController` | `AuthService`, `SessionManager`, `UserModel` |
+| Hồ sơ Candidate | `client.views.CandidateProfileScreen` | `CandidateProfileController` | Candidate profile service/DTO |
+| Hồ sơ Company / Expert | Profile screens trong `app/ui/screens/` | `CompanyProfileController`, `ExpertProfileController` | Profile services/DTO |
+| Tìm chuyên gia, hợp đồng, nhiệm vụ | Search/Contract/Task screens | Collaboration controllers | Search/Contract/Task services/DTO |
+| Điều hướng | `MainWindow` + dashboard callbacks | `MainWindow` điều phối màn hình | Không chứa nghiệp vụ domain |
+
+Dashboard Candidate, Company và Expert mở được màn hình hồ sơ đã có. Những
+menu Admin (quản lý người dùng/kỹ năng/cài đặt), cùng các mục nghiệp vụ chưa
+có màn hình hoặc service tương ứng, vẫn là placeholder; không giả định đã
+triển khai.
+
+### 2.3 Phân công bốn thành viên
+
+- **Nguyễn Quốc Trung (`Trungdeptrai-1`)** — tích hợp MVC, điều phối PR và
+  kiểm thử tích hợp; nhánh `feature/mvc-integration-trung`.
+- **Đinh Xuân Phát (`dinhxuanphat909-crypto`)** — database/model/migration;
+  phụ trách `server/database/`, `server/models/` và tương thích SQLite.
+- **Huỳnh Ngọc Dũng (`huynhdung123`)** — controller/service/phân quyền;
+  phụ trách `server/controllers/`, `server/services/` và các luồng domain.
+- **Nguyễn Thị Thu Thảo (`thao2351220224-cmd`)** — giao diện PySide6; mã chạy
+  phụ trách `client/views/`, `client/components/`, `client/assets/`; một số
+  màn hình legacy vẫn ở `app/ui/`.
+
+Chi tiết nhánh, nghiệm thu và PR riêng xem [docs/TEAM_ASSIGNMENTS.md](docs/TEAM_ASSIGNMENTS.md).
+
+Chạy ứng dụng bằng `python main.py`; chạy toàn bộ tests bằng
+`python -m pytest -q`; kiểm tra cú pháp bằng
+`python -m compileall -q app client server tests main.py`.
+
+## 3. Nguyên tắc thiết kế
 
 - **Single Responsibility**: mỗi module có một trách nhiệm duy nhất.
 - **Singleton DB**: `DatabaseConnection` đảm bảo một kết nối duy nhất trong suốt vòng đời ứng dụng.
 - **Centralized Styles**: toàn bộ QSS tập trung trong `utils/styles.py`, không inline style trong widget.
 - **Centralized Constants**: màu sắc, font, kích thước đều từ `utils/constants.py`.
 - **Migration-safe Schema**: `create_all_tables()` + `_apply_migrations()` đảm bảo idempotent khi chạy nhiều lần.
+- **Controller boundary**: View gửi thao tác qua controller; kiểm tra role vẫn nằm trong service.
 
 ---
 
@@ -271,42 +278,26 @@ if callable(self.on_action):
 
 > **Lý do:** Đơn giản hơn cho giai đoạn đầu. Có thể chuyển sang Signal/Slot ở giai đoạn sau khi cần type-safety.
 
-### 6.3 Luồng điều hướng thực tế (Giai đoạn 01)
+### 6.3 Luồng điều hướng hiện tại
 
 ```
-WelcomeScreen
-    │
-    ├── [Bắt đầu] ──────────────────────────► LoginScreen
-    │                                              │
-    │                                   [Đăng nhập thành công]
-    │                                              │
-    │                        ┌─────────────────────┴─────────────────────┐
-    │                        ▼ (theo role từ DB)                          │
-    │               DashboardScreen(user)                          [Quay lại]
-    │               (sidebar + content placeholder)                       │
-    │                        │                                            │
-    │                   [Đăng xuất]                                       │
-    │                        └──────────────────────────────► LoginScreen ◄┘
-    │
-    └── [Tìm hiểu thêm] → QMessageBox
+Welcome → Login → Dashboard(user)
+                     ├── Candidate → Candidate profile ──┐
+                     ├── Company   → Company profile ────┤→ Dashboard
+                     ├── Expert    → Expert profile ─────┘
+                     └── Logout → AuthController.logout() → Login
 ```
 
-**Cơ chế tạo/hủy Dashboard:**
-- Mỗi lần đăng nhập tạo `DashboardScreen` mới với `user` hiện tại.
-- Dashboard cũ bị xóa bằng `removeWidget()` + `deleteLater()` trước khi tạo mới.
-- `LoginScreen` được tạo một lần, `reset()` khi hiển thị lại.
+`MainWindow` điều phối bằng `QStackedWidget` và callback. Mỗi lần đăng nhập
+tạo Dashboard mới; Dashboard cũ bị xoá trước khi thay thế. Logout kết thúc
+session qua `AuthController` trước khi điều hướng về Login. Login screen được
+tái sử dụng và reset khi hiển thị lại.
 
-### 6.4 Lộ trình màn hình dự kiến
+### 6.4 Màn hình chưa triển khai
 
-```
-WelcomeScreen
-    └── [Bắt đầu] → LoginScreen
-                        ├── [admin]      → AdminDashboard
-                        ├── [instructor] → InstructorDashboard
-                        ├── [candidate]  → CandidateDashboard
-                        ├── [company]    → CompanyDashboard
-                        └── [expert]     → ExpertDashboard
-```
+Các menu Dashboard về quản lý Admin, kỹ năng, chứng chỉ, tuyển dụng, báo cáo,
+khoá học và tiến độ học tập vẫn là placeholder nếu chưa có màn hình/service
+tương ứng. Không được xem các mục này là chức năng đã hoàn thành.
 
 ---
 
@@ -335,7 +326,7 @@ WelcomeScreen
 ### 7.3 Cấu trúc một Screen mới
 
 ```python
-# app/ui/screens/example_screen.py
+# client/views/example_screen.py
 from __future__ import annotations
 from PySide6.QtWidgets import QWidget, QVBoxLayout
 from app.utils.constants import COLOR_OFF_WHITE
@@ -445,8 +436,9 @@ create_all_tables()
     ├── executescript(TRIGGERS_SQL)  # CREATE TRIGGER IF NOT EXISTS
     ├── executescript(SEED_SQL)      # INSERT OR IGNORE
     └── _apply_migrations()
-            ├── MIG-001: Cập nhật admin password hash (8c6976 → 67fc4c2b)
-            └── MIG-002: Recreate users table với role CHECK đầy đủ
+            ├── MIG-001..MIG-003: Tương thích xác thực và role legacy
+            ├── MIG-004: Bảng nghiệp vụ hồ sơ, hợp đồng, task và đánh giá
+            └── MIG-005: Soft-delete và cập nhật trạng thái hợp đồng
 ```
 
 **Nguyên tắc migration:**
@@ -469,7 +461,7 @@ create_all_tables()
 ### Giai đoạn 01 — Xác thực người dùng ✅ HOÀN THÀNH
 - [x] UserModel DTO, AuthService, SessionManager
 - [x] LoginScreen 2-panel, toggle password
-- [x] DashboardScreen placeholder 6 roles
+- [x] Dashboard theo 6 roles; navigation hồ sơ Candidate/Company/Expert
 - [x] Navigation Welcome→Login→Dashboard→Logout
 
 ### Giai đoạn 01.1 — Ổn định xác thực ✅ HOÀN THÀNH
@@ -479,7 +471,7 @@ create_all_tables()
 - [x] First-Run Admin Setup — không hardcode mật khẩu
 - [x] MIG-003: vô hiệu hóa admin legacy, yêu cầu reset
 - [x] MIG-002 sửa: `conn.execute()` thay `executescript()`, row-count verify, rollback
-- [x] Test suite: 133 tests PASS (pytest 8.3.5)
+- [x] Test suite cho authentication, session, migrations và regression
 
 ### Giai đoạn 02 — Dashboard nghiệp vụ theo vai trò
 - [ ] AdminDashboard — quản lý users, skills, settings
@@ -570,19 +562,13 @@ login(email, password)
 
 ## 14. Test Suite
 
-```
-tests/ (133 tests, pytest 8.3.5)
-├── conftest.py                   fresh_db, legacy_db, auth, session_mgr fixtures
-├── test_auth_service.py          40 tests — login/logout/session/roles/injection/timing
-├── test_migration.py             25 tests — MIG-001/002/003, rollback, FK, idempotent
-├── test_password_hashing.py      17 tests — PBKDF2, backward compat, timing safety
-├── test_session.py                9 tests — Singleton, states, roles
-└── test_regression_phase00_01.py 42 tests — regression full stack phase 00+01
-```
+`tests/` bao phủ authentication, registration, role checks, service behavior,
+migrations MIG-001..MIG-005 và các luồng tích hợp MVC. `tests/conftest.py`
+dùng database SQLite tạm cho từng test; không dùng `data/skillproof.db`.
 
-**Chạy:** `python -m pytest tests/ -v`  
-**DB test:** tmp_path fixture — KHÔNG đụng `data/skillproof.db` thật.
+**Chạy đầy đủ:** `python -m pytest -q`
+**Kiểm tra cú pháp:** `python -m compileall -q app client server tests main.py`
 
 ---
 
-*Tài liệu được cập nhật sau Giai đoạn 01.1 — SkillProof Authentication Hardening.*
+*Tài liệu cập nhật cho giai đoạn tích hợp MVC — SkillProof Desktop.*

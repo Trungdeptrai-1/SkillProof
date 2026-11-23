@@ -22,12 +22,16 @@ from app.utils.constants import (
 )
 from app.utils.styles import primary_button_style, secondary_button_style
 from app.services.task_service import (
-    TaskService, TaskResult, TaskModel,
+    TaskResult, TaskModel,
     TASK_TYPE_LABELS, TASK_STATUS_LABELS, TASK_PRIORITY_LABELS,
     TASK_TYPES, TASK_PRIORITY,
 )
-from app.services.contract_service import ContractService, ContractResult
+from app.services.contract_service import ContractResult
 from app.services.auth_service import SessionManager
+from server.controllers.collaboration_controller import (
+    ContractController,
+    TaskController,
+)
 
 TASK_STATUS_COLORS = {
     "pending":     "#F39C12",
@@ -44,8 +48,8 @@ class TaskManagementScreen(QWidget):
         super().__init__(parent)
         self.setMinimumSize(WINDOW_MIN_WIDTH, WINDOW_MIN_HEIGHT)
         self._on_back_cb = None
-        self._svc = TaskService()
-        self._contract_svc = ContractService()
+        self._controller = TaskController()
+        self._contract_controller = ContractController()
         self._setup_ui()
         self._load_tasks()
         QTimer.singleShot(80, self._animate_in)
@@ -167,7 +171,7 @@ class TaskManagementScreen(QWidget):
     def _load_active_contracts(self) -> None:
         """Load active contracts vào combo cho Company."""
         if not hasattr(self, "_contract_combo"): return
-        r = self._contract_svc.list_my_contracts(status_filter="active")
+        r = self._contract_controller.list_my_contracts(status_filter="active")
         self._contract_combo.clear()
         self._contract_combo.addItem("-- Chọn hợp đồng --", None)
         if r.success:
@@ -184,7 +188,7 @@ class TaskManagementScreen(QWidget):
             self._show_banner("Vui lòng nhập tiêu đề nhiệm vụ.", is_error=True); return
         if not contract_id:
             self._show_banner("Vui lòng chọn hợp đồng.", is_error=True); return
-        r = self._svc.create_task(contract_id, title, task_type, priority=priority)
+        r = self._controller.create_task(contract_id, title, task_type, priority=priority)
         if r.success:
             self._task_title.clear()
             self._show_banner("Tạo nhiệm vụ thành công!", is_error=False)
@@ -197,7 +201,7 @@ class TaskManagementScreen(QWidget):
         while self._tasks_layout.count():
             item = self._tasks_layout.takeAt(0)
             if item.widget(): item.widget().deleteLater()
-        r = self._svc.list_my_tasks(status_filter=status_filter)
+        r = self._controller.list_my_tasks(status_filter=status_filter)
         if not r.success:
             self._tasks_label.setText(r.message); return
         if not r.tasks:
@@ -266,11 +270,11 @@ class TaskManagementScreen(QWidget):
 
     def _do_task_action(self, action: str, task_id: int) -> None:
         if action == "start":
-            r = self._svc.start_task(task_id)
+            r = self._controller.start_task(task_id)
         elif action == "complete":
-            r = self._svc.complete_task(task_id)
+            r = self._controller.complete_task(task_id)
         elif action == "cancel":
-            r = self._svc.cancel_task(task_id)
+            r = self._controller.cancel_task(task_id)
         else: return
         if r.success:
             self._show_banner("Cập nhật thành công!", is_error=False); self._load_tasks()

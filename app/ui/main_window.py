@@ -19,6 +19,7 @@ from app.ui.screens.expert_search_screen import ExpertSearchScreen
 from app.ui.screens.contract_management_screen import ContractManagementScreen
 from app.ui.screens.task_management_screen import TaskManagementScreen
 from app.models.user_model            import UserModel
+from server.controllers.auth_controller import auth_controller
 from app.utils.constants import (
     APP_NAME,
     WINDOW_MIN_WIDTH, WINDOW_MIN_HEIGHT,
@@ -138,6 +139,8 @@ class MainWindow(QMainWindow):
         self._dashboard = DashboardScreen(user)
         self._dashboard.on_logout = self._on_logout
         self._dashboard.on_open_candidate_profile = self._show_candidate_profile
+        self._dashboard.on_open_company_profile = self._show_company_profile
+        self._dashboard.on_open_expert_profile = self._show_expert_profile
         self._stack.addWidget(self._dashboard)
         self._stack.setCurrentWidget(self._dashboard)
 
@@ -328,6 +331,6 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event) -> None:  # noqa: N802
         from app.database.connection import db
         from app.services.auth_service import auth_service
-        auth_service.logout()
+        auth_controller.logout()
         db.close()
         event.accept()

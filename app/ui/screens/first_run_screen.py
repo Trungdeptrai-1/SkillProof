@@ -26,11 +26,8 @@ from app.utils.constants import (
     WELCOME_WIDTH, WELCOME_HEIGHT,
 )
 from app.utils.styles  import primary_button_style
-from app.utils.helpers import (
-    hash_password, is_valid_email, is_strong_password,
-)
-from app.database.connection import db
-from app.database.schema     import mark_setup_done
+from app.utils.helpers import is_valid_email, is_strong_password
+from server.controllers.setup_controller import SetupController
 
 
 class FirstRunScreen(QWidget):
@@ -43,6 +40,7 @@ class FirstRunScreen(QWidget):
         super().__init__(parent)
         self.setMinimumSize(WELCOME_WIDTH, WELCOME_HEIGHT)
         self._on_complete_cb = None
+        self._controller = SetupController()
         self._setup_ui()
         QTimer.singleShot(80, self._animate_in)
 
@@ -262,42 +260,20 @@ class FirstRunScreen(QWidget):
         if pw1 != pw2:
             self._show_msg("Mật khẩu xác nhận không khớp."); return
 
-        # Kiểm tra email chưa dùng
-        existing = db.fetchone("SELECT id FROM users WHERE email=?", (email,))
-        if existing:
-            self._show_msg("Email này đã được sử dụng."); return
-
-        # Tạo tài khoản admin
         self._submit_btn.setEnabled(False)
         self._submit_btn.setText("Đang xử lý...")
-        try:
-            pw_hash = hash_password(pw1)
-            # Xác định username: lấy phần trước @ của email
-            username = email.split("@")[0]
-            # Đảm bảo username unique
-            existing_uname = db.fetchone(
-                "SELECT id FROM users WHERE username=?", (username,)
-            )
-            if existing_uname:
-                username = f"{username}_admin"
-
-            db.execute(
-                "INSERT INTO users(username,email,password,full_name,role,is_active)"
-                " VALUES(?,?,?,?,'admin',1)",
-                (username, email, pw_hash, full_name),
-            )
-            mark_setup_done()
+        result = self._controller.create_admin(full_name, email, pw1, pw2)
+        self._submit_btn.setEnabled(True)
+        self._submit_btn.setText("Hoàn tất thiết lập")
+        if result.success:
             # Xóa plain password khỏi bộ nhớ
             pw1 = pw2 = ""
             self._pw1_input.clear()
             self._pw2_input.clear()
-
-            self._show_msg("Thiết lập hoàn tất! Đang chuyển sang đăng nhập...", ok=True)
+            self._show_msg(result.message, ok=True)
             QTimer.singleShot(1200, self._complete)
-        except Exception as exc:
-            self._submit_btn.setEnabled(True)
-            self._submit_btn.setText("Hoàn tất thiết lập")
-            self._show_msg(f"Lỗi: {exc}")
+        else:
+            self._show_msg(result.message)
 
     def _complete(self) -> None:
         if callable(self._on_complete_cb):

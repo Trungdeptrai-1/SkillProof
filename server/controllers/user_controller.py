@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
-from server.services.user_service import RegisterResult, UserService, user_service
+from server.services.user_service import (
+    RegisterResult,
+    UserService,
+    user_service,
+)
 
 
 class UserController:
@@ -26,3 +30,6 @@ class UserController:
         return self._service.register(
             full_name, email, password, confirm_password
         )
+
+
+user_controller = UserController()

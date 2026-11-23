@@ -18,3 +18,6 @@ class AuthController:
     def logout(self) -> None:
         """End the current user session."""
         self._service.logout()
+
+
+auth_controller = AuthController()

@@ -26,10 +26,9 @@ from app.utils.constants import (
     WINDOW_MIN_WIDTH, WINDOW_MIN_HEIGHT,
 )
 from app.utils.styles import primary_button_style, secondary_button_style
-from app.services.company_profile_service import (
-    CompanyProfileService, ProfileResult, CompanyProfileModel,
-)
+from app.services.company_profile_service import ProfileResult, CompanyProfileModel
 from app.services.auth_service import SessionManager
+from server.controllers.profile_controller import CompanyProfileController
 
 
 class CompanyProfileScreen(QWidget):
@@ -44,7 +43,7 @@ class CompanyProfileScreen(QWidget):
         super().__init__(parent)
         self.setMinimumSize(WINDOW_MIN_WIDTH, WINDOW_MIN_HEIGHT)
         self._on_back_cb = None
-        self._svc = CompanyProfileService()
+        self._controller = CompanyProfileController()
         self._profile: CompanyProfileModel | None = None
         self._is_editing = False
         self._setup_ui()
@@ -334,7 +333,7 @@ class CompanyProfileScreen(QWidget):
 
     def _load_profile(self) -> None:
         """Tải hồ sơ từ service, hiển thị form tạo hoặc view."""
-        result = self._svc.get_profile()
+        result = self._controller.get_profile()
 
         if result.status == ProfileResult.NOT_FOUND:
             self._show_create_mode()
@@ -437,12 +436,12 @@ class CompanyProfileScreen(QWidget):
 
         if self._profile is None:
             # Create mode
-            result = self._svc.create_profile(
+            result = self._controller.create_profile(
                 company_name, industry, website, description, tax_code, address
             )
         else:
             # Update mode
-            result = self._svc.update_profile(
+            result = self._controller.update_profile(
                 company_name, industry, website, description, tax_code, address
             )
 

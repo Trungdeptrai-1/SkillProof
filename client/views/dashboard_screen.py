@@ -23,7 +23,7 @@ from app.utils.constants import (
 )
 from app.utils.styles import primary_button_style, secondary_button_style
 from app.models.user_model import UserModel, ROLE_LABELS, ROLE_ICONS
-from app.services.auth_service import session, auth_service
+from server.controllers.auth_controller import auth_controller
 
 
 # ── Cấu hình màn hình placeholder theo role ───────────────────────────────────
@@ -77,7 +77,7 @@ ROLE_CONFIG: dict[str, dict] = {
         "title":       "Cổng doanh nghiệp",
         "description": "Tìm kiếm và xác minh ứng viên dựa trên kỹ năng chứng nhận.",
         "features": [
-            ("🔍", "Tìm kiếm ứng viên",    "Lọc theo kỹ năng và chứng nhận"),
+            ("🏢", "Hồ sơ doanh nghiệp",   "Cập nhật thông tin doanh nghiệp"),
             ("✅", "Xác minh chứng chỉ",    "Kiểm tra tính xác thực chứng chỉ"),
             ("📢", "Đăng tin tuyển dụng",   "Đăng nhu cầu tuyển dụng"),
             ("📊", "Báo cáo nhân sự",       "Phân tích thị trường kỹ năng"),
@@ -90,7 +90,7 @@ ROLE_CONFIG: dict[str, dict] = {
         "features": [
             ("🎯", "Đánh giá kỹ năng",     "Thực hiện và ghi nhận đánh giá"),
             ("📜", "Cấp chứng nhận",        "Xét duyệt và cấp chứng chỉ"),
-            ("👥", "Hồ sơ ứng viên",       "Xem lịch sử và kết quả đánh giá"),
+            ("👤", "Hồ sơ chuyên gia",     "Cập nhật thông tin chuyên môn"),
             ("📈", "Báo cáo chuyên môn",   "Tổng kết hoạt động đánh giá"),
         ],
         "accent": "#E65100",
@@ -111,6 +111,8 @@ class _Sidebar(QWidget):
         self._user = user
         self._on_logout_cb = None
         self._on_open_candidate_profile_cb = None
+        self._on_open_company_profile_cb = None
+        self._on_open_expert_profile_cb = None
         self._setup_ui()
 
     def paintEvent(self, event):  # noqa: N802
@@ -192,6 +194,10 @@ class _Sidebar(QWidget):
             btn = self._make_menu_item(icon, label)
             if self._user.role == "candidate" and label == "Hồ sơ cá nhân":
                 btn.clicked.connect(self._handle_open_candidate_profile)
+            elif self._user.role == "company" and label == "Hồ sơ doanh nghiệp":
+                btn.clicked.connect(self._handle_open_company_profile)
+            elif self._user.role == "expert" and label == "Hồ sơ chuyên gia":
+                btn.clicked.connect(self._handle_open_expert_profile)
             layout.addWidget(btn)
             layout.addSpacing(4)
 
@@ -271,6 +277,30 @@ class _Sidebar(QWidget):
     def _handle_open_candidate_profile(self) -> None:
         if callable(self._on_open_candidate_profile_cb):
             self._on_open_candidate_profile_cb()
+
+    @property
+    def on_open_company_profile(self):
+        return self._on_open_company_profile_cb
+
+    @on_open_company_profile.setter
+    def on_open_company_profile(self, cb):
+        self._on_open_company_profile_cb = cb
+
+    def _handle_open_company_profile(self) -> None:
+        if callable(self._on_open_company_profile_cb):
+            self._on_open_company_profile_cb()
+
+    @property
+    def on_open_expert_profile(self):
+        return self._on_open_expert_profile_cb
+
+    @on_open_expert_profile.setter
+    def on_open_expert_profile(self, cb):
+        self._on_open_expert_profile_cb = cb
+
+    def _handle_open_expert_profile(self) -> None:
+        if callable(self._on_open_expert_profile_cb):
+            self._on_open_expert_profile_cb()
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -451,6 +481,8 @@ class DashboardScreen(QWidget):
         self._user = user
         self._on_logout_cb = None
         self._on_open_candidate_profile_cb = None
+        self._on_open_company_profile_cb = None
+        self._on_open_expert_profile_cb = None
         self._setup_ui()
         QTimer.singleShot(80, self._animate_in)
 
@@ -461,8 +493,6 @@ class DashboardScreen(QWidget):
     @on_logout.setter
     def on_logout(self, cb):
         self._on_logout_cb = cb
-        if self._sidebar:
-            self._sidebar.on_logout = cb
 
     @property
     def on_open_candidate_profile(self):
@@ -474,6 +504,26 @@ class DashboardScreen(QWidget):
         if self._sidebar:
             self._sidebar.on_open_candidate_profile = cb
 
+    @property
+    def on_open_company_profile(self):
+        return self._on_open_company_profile_cb
+
+    @on_open_company_profile.setter
+    def on_open_company_profile(self, cb):
+        self._on_open_company_profile_cb = cb
+        if self._sidebar:
+            self._sidebar.on_open_company_profile = cb
+
+    @property
+    def on_open_expert_profile(self):
+        return self._on_open_expert_profile_cb
+
+    @on_open_expert_profile.setter
+    def on_open_expert_profile(self, cb):
+        self._on_open_expert_profile_cb = cb
+        if self._sidebar:
+            self._sidebar.on_open_expert_profile = cb
+
     def _setup_ui(self) -> None:
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -482,6 +532,8 @@ class DashboardScreen(QWidget):
         self._sidebar = _Sidebar(self._user)
         self._sidebar.on_logout = self._handle_logout
         self._sidebar.on_open_candidate_profile = self._handle_open_candidate_profile
+        self._sidebar.on_open_company_profile = self._handle_open_company_profile
+        self._sidebar.on_open_expert_profile = self._handle_open_expert_profile
 
         self._content = _ContentArea(self._user)
 
@@ -500,10 +552,18 @@ class DashboardScreen(QWidget):
         self._anim.start()
 
     def _handle_logout(self) -> None:
-        auth_service.logout()
+        auth_controller.logout()
         if callable(self._on_logout_cb):
             self._on_logout_cb()
 
     def _handle_open_candidate_profile(self) -> None:
         if callable(self._on_open_candidate_profile_cb):
             self._on_open_candidate_profile_cb()
+
+    def _handle_open_company_profile(self) -> None:
+        if callable(self._on_open_company_profile_cb):
+            self._on_open_company_profile_cb()
+
+    def _handle_open_expert_profile(self) -> None:
+        if callable(self._on_open_expert_profile_cb):
+            self._on_open_expert_profile_cb()

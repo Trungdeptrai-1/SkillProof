@@ -29,10 +29,11 @@ from app.utils.constants import (
 )
 from app.utils.styles import primary_button_style, secondary_button_style
 from app.services.expert_profile_service import (
-    ExpertProfileService, ExpertProfileResult, ExpertProfileModel,
+    ExpertProfileResult, ExpertProfileModel,
     AVAILABILITY_LABELS, AVAILABILITY_VALUES,
 )
 from app.services.auth_service import SessionManager
+from server.controllers.profile_controller import ExpertProfileController
 
 
 class ExpertProfileScreen(QWidget):
@@ -47,7 +48,7 @@ class ExpertProfileScreen(QWidget):
         super().__init__(parent)
         self.setMinimumSize(WINDOW_MIN_WIDTH, WINDOW_MIN_HEIGHT)
         self._on_back_cb = None
-        self._svc = ExpertProfileService()
+        self._controller = ExpertProfileController()
         self._profile: ExpertProfileModel | None = None
         self._is_editing = False
         self._setup_ui()
@@ -370,7 +371,7 @@ class ExpertProfileScreen(QWidget):
             self._acc_name_lbl.setText(session.current_user.display_name)
             self._acc_email_lbl.setText(session.current_user.email)
 
-        result = self._svc.get_profile()
+        result = self._controller.get_profile()
         if result.status == ExpertProfileResult.NOT_FOUND:
             self._show_create_mode()
         elif result.success:
@@ -455,9 +456,9 @@ class ExpertProfileScreen(QWidget):
         availability = self._avail_combo.itemData(avail_idx) or "available"
 
         if self._profile is None:
-            result = self._svc.create_profile(title, bio, spec, rate, availability)
+            result = self._controller.create_profile(title, bio, spec, rate, availability)
         else:
-            result = self._svc.update_profile(title, bio, spec, rate, availability)
+            result = self._controller.update_profile(title, bio, spec, rate, availability)
 
         if result.success:
             self._profile = result.profile

@@ -1,23 +1,29 @@
 # Client (giao diện desktop)
 
-`client/` là phần giao diện PySide6 chạy trong cùng tiến trình ứng dụng
-desktop SkillProof. Đây không phải web client và không giao tiếp với web
-server.
+`client/` là giao diện PySide6 chạy trong cùng tiến trình ứng dụng SkillProof.
+Đây không phải web client và không giao tiếp với web server.
 
-## Mã nguồn giao diện
+## Ánh xạ với mã nguồn
 
-| Thư mục | Vai trò dự kiến | Module hiện đang thực thi |
+| Thư mục | Trách nhiệm | Mã nguồn hiện dùng |
 |---|---|---|
-| `views/` | Các màn hình PySide6 | `client/views/` |
-| `components/` | Widget và thành phần giao diện tái sử dụng | `client/components/` |
-| `assets/` | Icon, hình ảnh và tài nguyên giao diện | `assets/icons/`, `assets/images/`; style hiện ở `app/utils/styles.py` |
+| `views/` | Màn hình PySide6 | `client/views/` cho welcome, đăng nhập, đăng ký, dashboard và hồ sơ Candidate |
+| `components/` | Widget dùng lại | `client/components/`, gồm `PasswordField` |
+| `assets/` | Icon, hình ảnh và tài nguyên | `assets/`; style dùng chung hiện ở `app/utils/styles.py` |
 
-Welcome, đăng nhập, đăng ký, dashboard và hồ sơ ứng viên được triển khai
-trong `client/views/`. Các module cùng tên dưới `app/ui/screens/` là lớp
-chuyển tiếp để giữ nguyên các import hiện có. `MainWindow` tiếp tục điều
-hướng bằng `QStackedWidget` và callback; các màn hình gọi services trong
-`app/services/`.
+`app/ui/main_window.py` điều phối màn hình bằng `QStackedWidget` và callback.
+Các màn hình có sẵn ngoài `client/views/` (thiết lập lần đầu, hồ sơ Company
+và Expert, tìm kiếm, hợp đồng và nhiệm vụ) vẫn được triển khai trong
+`app/ui/screens/`. Những module tương ứng dưới `app/ui/screens/` đối với
+Welcome, đăng nhập, đăng ký, dashboard và hồ sơ Candidate là lớp tương thích
+để giữ nguyên các import cũ.
 
-`PasswordField` trong `client/components/` được dùng chung bởi các màn hình
-đăng nhập, đăng ký và thiết lập lần đầu. Các màn hình nghiệp vụ khác vẫn ở
-`app/ui/screens/`.
+## Luồng MVC
+
+View gửi yêu cầu qua controller trong `server/controllers/`; controller gọi
+service phù hợp và trả kết quả về View. `MainWindow` chịu trách nhiệm điều
+hướng, còn `SessionManager` cung cấp thông tin phiên đăng nhập cho giao diện.
+Các màn hình Admin chưa có nghiệp vụ quản trị vẫn được ghi nhận là placeholder.
+
+Chạy ứng dụng từ thư mục gốc bằng `python main.py`. Chạy kiểm thử bằng
+`python -m pytest -q`.
