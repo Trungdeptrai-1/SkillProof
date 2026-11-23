@@ -204,7 +204,7 @@ class TestLogoutRelogin:
 class TestDatabaseError:
     def test_db_error_returns_db_error_status(self, fresh_db):
         auth = make_auth(fresh_db)
-        with patch("app.services.auth_service.db") as mock_db:
+        with patch("server.services.auth_service.db") as mock_db:
             mock_db.fetchone.side_effect = sqlite3.OperationalError("gone")
             r = auth.login("test@sp.local", "Pass@1Word")
         assert r.status == LoginResult.DB_ERROR
@@ -213,7 +213,7 @@ class TestDatabaseError:
 
     def test_db_error_no_crash(self, fresh_db):
         auth = make_auth(fresh_db)
-        with patch("app.services.auth_service.db") as mock_db:
+        with patch("server.services.auth_service.db") as mock_db:
             mock_db.fetchone.side_effect = RuntimeError("unexpected")
             r = auth.login("test@sp.local", "Pass@1Word")
         assert r.status == LoginResult.DB_ERROR
