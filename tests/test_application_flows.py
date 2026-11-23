@@ -178,6 +178,11 @@ def test_company_profile_screen_creates_profile(fresh_db, qt_app):
 
     assert screen._profile is not None
     assert screen._profile.company_name == "QA Company"
+    screen._btn_edit.click()
+    screen._company_name.setText("QA Company Updated")
+    screen._btn_save.click()
+    assert screen._profile.company_name == "QA Company Updated"
+    assert screen._controller.get_profile().profile.company_name == "QA Company Updated"
     screen.deleteLater()
 
 
@@ -194,6 +199,11 @@ def test_expert_profile_screen_creates_profile(fresh_db, qt_app):
 
     assert screen._profile is not None
     assert screen._profile.title == "QA Expert"
+    screen._btn_edit.click()
+    screen._title_input.setText("QA Expert Updated")
+    screen._btn_save.click()
+    assert screen._profile.title == "QA Expert Updated"
+    assert screen._controller.get_profile().profile.title == "QA Expert Updated"
     screen.deleteLater()
 
 
