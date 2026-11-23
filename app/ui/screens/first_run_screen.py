@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
     QGraphicsOpacityEffect,
 )
 
+from client.components.password_field import PasswordField
 from app.utils.constants import (
     APP_NAME,
     COLOR_NAVY_DARK, COLOR_NAVY, COLOR_NAVY_MID, COLOR_NAVY_LIGHT,
@@ -179,16 +180,18 @@ class FirstRunScreen(QWidget):
         # Password
         cl.addWidget(self._field_label("Mật khẩu (tối thiểu 8 ký tự, có chữ hoa và số)"))
         cl.addSpacing(5)
-        self._pw1_input, pw1_wrapper = self._pw_field("Nhập mật khẩu")
-        cl.addWidget(pw1_wrapper)
+        self._pw1_field = PasswordField("Nhập mật khẩu")
+        self._pw1_input = self._pw1_field.line_edit
+        cl.addWidget(self._pw1_field)
         cl.addSpacing(14)
 
         # Confirm password
         cl.addWidget(self._field_label("Xác nhận mật khẩu"))
         cl.addSpacing(5)
-        self._pw2_input, pw2_wrapper = self._pw_field("Nhập lại mật khẩu")
+        self._pw2_field = PasswordField("Nhập lại mật khẩu")
+        self._pw2_input = self._pw2_field.line_edit
         self._pw2_input.returnPressed.connect(self._on_submit)
-        cl.addWidget(pw2_wrapper)
+        cl.addWidget(self._pw2_field)
         cl.addSpacing(22)
 
         # Submit
@@ -230,46 +233,6 @@ class FirstRunScreen(QWidget):
             }}
             QLineEdit:focus {{ border-color:{COLOR_ACCENT if not error else COLOR_ERROR}; }}
         """
-
-    def _pw_field(self, placeholder: str) -> tuple[QLineEdit, QFrame]:
-        wrapper = QFrame()
-        wrapper.setStyleSheet(f"""
-            QFrame {{
-                background:{COLOR_WHITE};
-                border:1.5px solid {COLOR_LIGHT_GRAY};
-                border-radius:8px;
-            }}
-        """)
-        wrapper.setFixedHeight(42)
-        wl = QHBoxLayout(wrapper)
-        wl.setContentsMargins(12, 0, 4, 0)
-        inp = QLineEdit()
-        inp.setEchoMode(QLineEdit.EchoMode.Password)
-        inp.setPlaceholderText(placeholder)
-        inp.setStyleSheet(
-            "QLineEdit{border:none;background:transparent;font-size:13px;"
-            "color:" + COLOR_TEXT_DARK + ";padding:0;}"
-        )
-        toggle = QPushButton("👁")
-        toggle.setFixedSize(30, 30)
-        toggle.setCursor(Qt.CursorShape.PointingHandCursor)
-        toggle.setStyleSheet(
-            f"QPushButton{{background:transparent;border:none;font-size:15px;"
-            f"color:{COLOR_TEXT_MUTED};}}"
-            f"QPushButton:hover{{color:{COLOR_ACCENT};}}"
-        )
-        visible = [False]
-        def _toggle():
-            visible[0] = not visible[0]
-            inp.setEchoMode(
-                QLineEdit.EchoMode.Normal if visible[0]
-                else QLineEdit.EchoMode.Password
-            )
-            toggle.setText("🙈" if visible[0] else "👁")
-        toggle.clicked.connect(_toggle)
-        wl.addWidget(inp)
-        wl.addWidget(toggle)
-        return inp, wrapper
 
     # ── Handler ───────────────────────────────────────────────────────────────
 
