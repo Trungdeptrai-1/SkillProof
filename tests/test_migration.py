@@ -302,7 +302,7 @@ class TestCreateAllTables:
         assert row is None
 
     def test_fresh_db_all_tables(self, fresh_db):
-        """DB mới phải có 22 bảng (7 cũ + 15 mới từ MIG-004)."""
+        """A new database includes legacy, business, and recruitment tables."""
         tables = {
             r["name"] for r in fresh_db.fetchall(
                 "SELECT name FROM sqlite_master WHERE type='table'"
@@ -321,9 +321,15 @@ class TestCreateAllTables:
             "interviews", "interview_participants", "interview_evaluations",
             "company_expert_contracts", "tasks",
         }
+        recruitment_tables = {
+            "job_postings",
+            "recruitment_invitations",
+            "recruitment_submissions",
+        }
         assert old_tables <= tables, "Thiếu bảng cũ"
         assert new_tables <= tables, "Thiếu bảng mới (MIG-004)"
-        assert len(tables) == 22, f"Expected 22, got {len(tables)}"
+        assert recruitment_tables <= tables, "Thiếu bảng tuyển dụng (MIG-006)"
+        assert len(tables) == 25, f"Expected 25, got {len(tables)}"
 
     def test_legacy_db_full_migration(self, legacy_db):
         """
