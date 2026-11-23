@@ -13,6 +13,7 @@ from server.models.recruitment_models import (
     RecruitmentInvitationModel,
     RecruitmentSubmissionModel,
 )
+from server.models.recruitment_repository import RecruitmentRepository
 from server.models.skill_model import SkillModel
 from server.models.user_model import ROLE_ICONS, ROLE_LABELS, UserModel, UserRole
 
@@ -29,6 +30,7 @@ __all__ = [
     "ROLE_ICONS",
     "ROLE_LABELS",
     "RecruitmentInvitationModel",
+    "RecruitmentRepository",
     "RecruitmentSubmissionModel",
     "SkillModel",
     "UserModel",

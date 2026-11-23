@@ -10,7 +10,7 @@ change Authentication, UI, Controllers, or Services.
 |---|---|---|
 | `job_postings` *(MIG-006)* | Company vacancy | `company_id -> users.id`; title, description, requirements, location, status |
 | `exam_papers` *(existing)* | Reusable exam/test | Published paper selected for an invitation |
-| `question_bank` *(existing)* | Question source | Existing `reference_answer` and `test_cases` are confidential grading data |
+| `question_bank` *(existing)* | Question source | `expert_id` is the author; `reference_answer` and `test_cases` are confidential grading data |
 | `question_options` *(existing)* | Multiple-choice options | Existing `is_correct` is confidential grading data |
 | `exam_paper_questions` *(existing)* | Questions in a paper | Reuses the existing question and score/order relationship |
 | `recruitment_invitations` *(MIG-006)* | Candidate invitation | Company, job, candidate, paper, response, and linked exam-session context |
@@ -40,6 +40,12 @@ MIG-006 also checks that a job owner has the `company` role, an invited user has
 the `candidate` role, and the job and paper are published when an invitation is
 created. Job ownership and invitation/submission identity fields are immutable
 after creation (the invitation's exam session can be linked once on acceptance).
+
+`question_bank.expert_id` remains the author and must not be filled with the
+Company's id. The persistence layer accepts a question only with an explicit
+Expert id who has an `active` contract with that Company. The current
+`ExamService.add_question()` call does not provide that id; do not infer an
+author by choosing an arbitrary contracted Expert.
 
 ## Lifecycle and status values
 
@@ -101,9 +107,31 @@ Import the shared DTOs from `server.models`:
 - `ExamQuestionModel`, `QuestionOptionModel`
 - `RecruitmentInvitationModel`, `ExamSessionModel`, `ExamAnswerModel`
 - `RecruitmentSubmissionModel`, `CandidateExamResultModel`
+- `RecruitmentRepository` implements both Service persistence protocols.
 
 Models are immutable row DTOs; they do not execute SQL or replace authorization
 in Services. Use the existing SQLite connection and schema migration path.
+
+To reconcile question authorship, the proposed `ExamModel.add_question`
+signature is:
+
+```python
+def add_question(
+    self,
+    company_id: int,
+    exam_id: int,
+    *,
+    expert_id: int,
+    title: str,
+    content: str,
+    difficulty: str,
+    points: float,
+    options: Sequence[ExamOption],
+) -> Mapping[str, object] | None: ...
+```
+
+The Service/UI must choose an actual active contracted Expert (or support
+selecting an existing Expert-authored question) before calling this method.
 
 ## Migration compatibility
 
