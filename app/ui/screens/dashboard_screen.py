@@ -23,7 +23,8 @@ from app.utils.constants import (
 )
 from app.utils.styles import primary_button_style, secondary_button_style
 from app.models.user_model import UserModel, ROLE_LABELS, ROLE_ICONS
-from app.services.auth_service import session, auth_service
+from app.services.auth_service import session
+from server.controllers.auth_controller import auth_controller
 
 
 # ── Cấu hình màn hình placeholder theo role ───────────────────────────────────
@@ -473,6 +474,6 @@ class DashboardScreen(QWidget):
         self._anim.start()
 
     def _handle_logout(self) -> None:
-        auth_service.logout()
+        auth_controller.logout()
         if callable(self._on_logout_cb):
             self._on_logout_cb()

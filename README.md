@@ -77,6 +77,48 @@ python -m pytest tests/ -q
 
 ---
 
+CI also runs syntax checks and the full pytest suite for pull requests to
+`main` and pushes to `main`. See [docs/CI_GUIDE.md](docs/CI_GUIDE.md).
+
+---
+
+## Kiến trúc MVC hiện tại
+
+SkillProof là ứng dụng desktop một tiến trình. `server/` là tầng ứng dụng và
+dữ liệu, **không** phải web server; `client/` đại diện cho UI PySide6. Các
+thư mục mới xác lập ranh giới kiến trúc, trong khi mã runtime hiện vẫn giữ ở
+`app/` để tương thích.
+
+```text
+main.py → SQLite schema → QApplication/MainWindow → View
+                                              → Controller
+                                              → Service
+                                              → Model/SQLite
+```
+
+- **View:** `app/ui/` và tài nguyên `assets/`; màn hình gửi thao tác qua
+  `server/controllers/`.
+- **Controller:** điều phối xác thực/đăng ký, thiết lập Admin, hồ sơ, tìm
+  chuyên gia, hợp đồng và nhiệm vụ; không lặp lại nghiệp vụ.
+- **Service:** xác thực và thiết lập Admin ở `server/services/`; các
+  user/profile/search/contract/task services hiện ở `app/services/`. Service
+  chịu trách nhiệm nghiệp vụ, phân quyền và truy cập dữ liệu.
+- **Model/database:** `UserModel` ở `app/models/`; DTO nghiệp vụ khác còn nằm
+  trong service. SQLite, schema và migrations ở `app/database/`.
+- `client/views`, `client/components`, `client/assets`, `server/models` và
+  `server/database` hiện là ranh giới thư mục, chưa phải package runtime riêng.
+
+| Thành viên | Phạm vi |
+|---|---|
+| Nguyễn Quốc Trung (`Trungdeptrai-1`) | Tích hợp MVC, điều phối PR, kiểm thử tích hợp |
+| Đinh Xuân Phát (`dinhxuanphat909-crypto`) | Database, Model, Migration |
+| Huỳnh Ngọc Dũng (`huynhdung123`) | Controller, Services, phân quyền |
+| Nguyễn Thị Thu Thảo (`thao2351220224-cmd`) | Giao diện PySide6 |
+
+Chi tiết nhánh, nhiệm vụ và nghiệm thu: [docs/TEAM_ASSIGNMENTS.md](docs/TEAM_ASSIGNMENTS.md).
+
+---
+
 ## Cấu trúc dự án
 
 ```
@@ -85,6 +127,17 @@ SkillProof_New/
 ├── requirements.txt
 ├── README.md
 ├── .gitignore
+│
+├── server/                     # Tầng ứng dụng/dữ liệu (không phải web server)
+│   ├── controllers/            # Điều phối View ↔ Service
+│   ├── services/               # Auth và first-run setup
+│   ├── models/                 # Ranh giới kiến trúc; runtime hiện ở app/models
+│   └── database/               # Ranh giới kiến trúc; runtime hiện ở app/database
+├── client/                     # Ranh giới UI desktop; runtime hiện ở app/ui
+│   ├── views/
+│   ├── components/
+│   └── assets/
+├── docs/                       # Team assignments, CI guide
 │
 ├── app/                        # Package ứng dụng
 │   ├── ui/
@@ -151,7 +204,7 @@ SkillProof_New/
 - [x] Màn hình đăng nhập / đăng xuất (Giai đoạn 01)
 - [x] First-Run Admin Setup — không hardcode mật khẩu (Giai đoạn 01.1)
 - [x] PBKDF2-SHA256 per-user salt, lazy migration hash cũ (Giai đoạn 01.1)
-- [x] Test suite tự động: 133 tests — auth, session, migration, regression (Giai đoạn 01.1)
+- [x] Test suite tự động — auth, session, migration, nghiệp vụ và MVC regression
 - [ ] Dashboard người dùng theo role
 - [ ] Quản lý kỹ năng
 - [ ] Quản lý chứng chỉ

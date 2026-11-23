@@ -148,11 +148,22 @@ class UserService:
                 "SELECT id FROM users WHERE username = ?",
                 (username,),
             )
-        except Exception:
-            uname_check = None
+        except sqlite3.Error as exc:
+            logger.error("DB error during username check: %s", exc)
+            return RegisterResult(RegisterResult.DB_ERROR)
 
         if uname_check is not None:
-            username = f"{username}_{db.fetchone('SELECT COALESCE(MAX(id),0)+1 FROM users').fetchone()[0]}"
+            try:
+                next_id = db.fetchone(
+                    "SELECT COALESCE(MAX(id),0)+1 AS next_id FROM users"
+                )
+            except sqlite3.Error as exc:
+                logger.error("DB error generating username: %s", exc)
+                return RegisterResult(RegisterResult.DB_ERROR)
+            if next_id is None:
+                logger.error("Could not generate a unique username during registration.")
+                return RegisterResult(RegisterResult.DB_ERROR)
+            username = f"{username}_{next_id['next_id']}"
 
         # ── 5. INSERT vào DB ────────────────────────────────────────────────────
         try:

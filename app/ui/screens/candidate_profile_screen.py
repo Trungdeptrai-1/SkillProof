@@ -33,10 +33,9 @@ from app.utils.constants import (
     WINDOW_MIN_WIDTH, WINDOW_MIN_HEIGHT,
 )
 from app.utils.styles import primary_button_style, secondary_button_style
-from app.services.candidate_profile_service import (
-    CandidateProfileService, CandidateProfileResult, CandidateProfileModel,
-)
+from app.services.candidate_profile_service import CandidateProfileResult, CandidateProfileModel
 from app.services.auth_service import SessionManager
+from server.controllers.profile_controller import CandidateProfileController
 
 
 class CandidateProfileScreen(QWidget):
@@ -51,7 +50,7 @@ class CandidateProfileScreen(QWidget):
         super().__init__(parent)
         self.setMinimumSize(WINDOW_MIN_WIDTH, WINDOW_MIN_HEIGHT)
         self._on_back_cb = None
-        self._svc = CandidateProfileService()
+        self._controller = CandidateProfileController()
         self._profile: CandidateProfileModel | None = None
         self._is_editing = False
         self._setup_ui()
@@ -478,7 +477,7 @@ class CandidateProfileScreen(QWidget):
 
     def _load_profile(self) -> None:
         """Tải hồ sơ từ service, hiển thị form tạo hoặc view."""
-        result = self._svc.get_profile()
+        result = self._controller.get_profile()
 
         if result.status == CandidateProfileResult.NOT_FOUND:
             self._show_create_mode()
@@ -529,7 +528,7 @@ class CandidateProfileScreen(QWidget):
         self._email_lbl.setText(self._profile.email or "—")
         self._headline_input.setText(self._profile.headline or "")
         self._bio_input.setPlainText(self._profile.bio or "")
-        self._portfolio_input.setText(self._portfolio.portfolio_url or "")
+        self._portfolio_input.setText(self._profile.portfolio_url or "")
         self._years_input.setValue(self._profile.years_experience or 0)
 
     def _set_form_enabled(self, enabled: bool) -> None:
@@ -557,7 +556,7 @@ class CandidateProfileScreen(QWidget):
         return int((filled + 2) / total * 100)
 
     def _update_cv_status(self) -> None:
-        cv_path = self._svc.get_cv_path()
+        cv_path = self._controller.get_cv_path()
         if cv_path:
             filename = os.path.basename(cv_path)
             self._cv_status.setText(f"✅ CV đã tải lên: {filename}")
@@ -579,11 +578,11 @@ class CandidateProfileScreen(QWidget):
         self._headline_input.setStyleSheet(self._input_css(error=False))
 
         if self._profile is None:
-            result = self._svc.create_profile(
+            result = self._controller.create_profile(
                 headline, bio, portfolio_url, years
             )
         else:
-            result = self._svc.update_profile(
+            result = self._controller.update_profile(
                 headline, bio, portfolio_url, years
             )
 
@@ -616,7 +615,7 @@ class CandidateProfileScreen(QWidget):
         if not file_path:
             return
 
-        result = self._svc.save_cv(file_path)
+        result = self._controller.save_cv(file_path)
         if result.success:
             self._profile = result.profile
             self._show_view_mode()
@@ -626,7 +625,7 @@ class CandidateProfileScreen(QWidget):
 
     def _on_open_cv(self) -> None:
         """Mở file CV bằng ứng dụng mặc định của hệ điều hành."""
-        cv_path = self._svc.get_cv_path()
+        cv_path = self._controller.get_cv_path()
         if not cv_path:
             self._show_banner("Chưa có CV để mở.", is_error=True)
             return

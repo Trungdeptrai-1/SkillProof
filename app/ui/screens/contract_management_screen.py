@@ -21,8 +21,9 @@ from app.utils.constants import (
     WINDOW_MIN_WIDTH, WINDOW_MIN_HEIGHT,
 )
 from app.utils.styles import primary_button_style, secondary_button_style
-from app.services.contract_service import ContractService, ContractResult, ContractModel
+from app.services.contract_service import ContractResult, ContractModel
 from app.services.auth_service import SessionManager
+from server.controllers.collaboration_controller import ContractController
 
 STATUS_LABELS = {
     "pending_expert": ("🕐", "#F39C12", "Chờ chuyên gia"),
@@ -42,7 +43,7 @@ class ContractManagementScreen(QWidget):
         self.setMinimumSize(WINDOW_MIN_WIDTH, WINDOW_MIN_HEIGHT)
         self._on_back_cb = None
         self._on_find_experts_cb = None
-        self._svc = ContractService()
+        self._controller = ContractController()
         self._setup_ui()
         self._load_contracts()
         QTimer.singleShot(80, self._animate_in)
@@ -156,7 +157,7 @@ class ContractManagementScreen(QWidget):
         while self._contracts_layout.count():
             item = self._contracts_layout.takeAt(0)
             if item.widget(): item.widget().deleteLater()
-        r = self._svc.list_my_contracts(status_filter=status_filter)
+        r = self._controller.list_my_contracts(status_filter=status_filter)
         if not r.success:
             self._contracts_label.setText(r.message); return
         if not r.contracts:
@@ -236,15 +237,15 @@ class ContractManagementScreen(QWidget):
 
     def _do_action(self, action: str, contract_id: int) -> None:
         if action == "cancel_pending":
-            r = self._svc.cancel_pending_contract(contract_id)
+            r = self._controller.cancel_pending_contract(contract_id)
         elif action == "complete":
-            r = self._svc.complete_contract(contract_id)
+            r = self._controller.complete_contract(contract_id)
         elif action == "terminate":
-            r = self._svc.terminate_contract(contract_id, reason="Chấm dứt bởi doanh nghiệp")
+            r = self._controller.terminate_contract(contract_id, reason="Chấm dứt bởi doanh nghiệp")
         elif action == "accept":
-            r = self._svc.accept_contract(contract_id)
+            r = self._controller.accept_contract(contract_id)
         elif action == "reject":
-            r = self._svc.reject_contract(contract_id)
+            r = self._controller.reject_contract(contract_id)
         else:
             return
         if r.success:

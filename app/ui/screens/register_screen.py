@@ -24,7 +24,8 @@ from app.utils.constants import (
     WELCOME_WIDTH, WELCOME_HEIGHT,
 )
 from app.utils.styles  import primary_button_style
-from app.services.user_service import user_service, RegisterResult
+from app.services.user_service import RegisterResult
+from server.controllers.user_controller import user_controller
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -329,7 +330,7 @@ class _RegisterFormPanel(QWidget):
         self._submit_btn.setEnabled(False)
         self._submit_btn.setText("Đang xử lý...")
 
-        result = user_service.register(full_name, email, pw1, pw2)
+        result = user_controller.register(full_name, email, pw1, pw2)
 
         self._submit_btn.setEnabled(True)
         self._submit_btn.setText("Đăng ký")

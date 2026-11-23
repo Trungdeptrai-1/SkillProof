@@ -20,11 +20,12 @@ from app.utils.constants import (
     WINDOW_MIN_WIDTH, WINDOW_MIN_HEIGHT,
 )
 from app.utils.styles import primary_button_style, secondary_button_style
-from app.services.expert_search_service import (
-    ExpertSearchService, ExpertSearchResult,
-    SearchResult,
+from app.services.expert_search_service import ExpertSearchResult, SearchResult
+from app.services.contract_service import ContractResult
+from server.controllers.collaboration_controller import (
+    ContractController,
+    ExpertSearchController,
 )
-from app.services.contract_service import ContractService, ContractResult
 
 
 class ExpertSearchScreen(QWidget):
@@ -38,8 +39,8 @@ class ExpertSearchScreen(QWidget):
         self.setMinimumSize(WINDOW_MIN_WIDTH, WINDOW_MIN_HEIGHT)
         self._on_back_cb = None
         self._on_view_contracts_cb = None
-        self._svc = ExpertSearchService()
-        self._contract_svc = ContractService()
+        self._controller = ExpertSearchController()
+        self._contract_controller = ContractController()
         self._setup_ui()
         QTimer.singleShot(80, self._animate_in)
 
@@ -162,7 +163,7 @@ class ExpertSearchScreen(QWidget):
         while self._results_layout.count():
             item = self._results_layout.takeAt(0)
             if item.widget(): item.widget().deleteLater()
-        r = self._svc.search(specialization=spec, availability=avail)
+        r = self._controller.search(specialization=spec, availability=avail)
         if not r.success:
             self._show_banner(r.message, is_error=True); return
         if not r.experts:
@@ -209,7 +210,7 @@ class ExpertSearchScreen(QWidget):
 
     def _on_invite(self, expert_profile_id: int, btn: QPushButton) -> None:
         btn.setEnabled(False); btn.setText("Đang gửi...")
-        r = self._contract_svc.invite_expert(expert_profile_id)
+        r = self._contract_controller.invite_expert(expert_profile_id)
         if r.success:
             btn.setText("✓ Đã mời"); self._show_banner("Đã gửi đề nghị hợp tác thành công!", is_error=False)
         else:

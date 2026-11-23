@@ -14,9 +14,11 @@ server.
 
 `main.py` tạo `QApplication`, áp dụng stylesheet rồi hiển thị `MainWindow`.
 `MainWindow` hiện dùng `QStackedWidget` và callback để điều hướng các màn
-hình. Các màn hình gọi services trong `app/services/`; phần giao diện và
-nghiệp vụ vẫn được giữ nguyên vị trí hiện tại trong nhiệm vụ này.
+hình. Các màn hình gọi controllers trong `server/controllers/`; controller
+điều phối đến các services mà không lặp lại nghiệp vụ hay kiểm tra quyền.
+SessionManager vẫn được đọc để hiển thị role và thông tin người dùng.
 
-Các thư mục trong `client/` chỉ xác lập ranh giới kiến trúc cho công việc
-tiếp theo. Không có mã nguồn nào được di chuyển hoặc sao chép; thư mục trống
-được Git theo dõi bằng `.gitkeep`.
+Mã UI PySide6 thực thi vẫn ở `app/ui/`, stylesheet ở `app/utils/styles.py`,
+và tài nguyên ở `assets/`. `client/views`, `client/components` và
+`client/assets` là ranh giới kiến trúc, chưa phải package runtime riêng;
+không có mã nguồn nào bị di chuyển trong lần tích hợp này.
