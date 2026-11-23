@@ -4,19 +4,19 @@
 desktop SkillProof. Đây không phải web client và không giao tiếp với web
 server.
 
-## Ánh xạ với mã nguồn hiện tại
+## Mã nguồn giao diện
 
 | Thư mục | Vai trò dự kiến | Module hiện đang thực thi |
 |---|---|---|
-| `views/` | Các màn hình và cửa sổ PySide6 | `app/ui/screens/`, `app/ui/main_window.py` |
-| `components/` | Widget và thành phần giao diện tái sử dụng | `app/ui/components/`, `app/ui/dialogs/` |
+| `views/` | Các màn hình PySide6 | `client/views/` |
+| `components/` | Widget và thành phần giao diện tái sử dụng | `client/components/` |
 | `assets/` | Icon, hình ảnh và tài nguyên giao diện | `assets/icons/`, `assets/images/`; style hiện ở `app/utils/styles.py` |
 
-`main.py` tạo `QApplication`, áp dụng stylesheet rồi hiển thị `MainWindow`.
-`MainWindow` hiện dùng `QStackedWidget` và callback để điều hướng các màn
-hình. Các màn hình gọi services trong `app/services/`; phần giao diện và
-nghiệp vụ vẫn được giữ nguyên vị trí hiện tại trong nhiệm vụ này.
+Welcome, đăng nhập và đăng ký hiện được triển khai trong `client/views/`.
+Các module cùng tên dưới `app/ui/screens/` là lớp chuyển tiếp để giữ nguyên
+các import hiện có. `MainWindow` tiếp tục điều hướng bằng `QStackedWidget`
+và callback; các màn hình gọi services trong `app/services/`.
 
-Các thư mục trong `client/` chỉ xác lập ranh giới kiến trúc cho công việc
-tiếp theo. Không có mã nguồn nào được di chuyển hoặc sao chép; thư mục trống
-được Git theo dõi bằng `.gitkeep`.
+`PasswordField` trong `client/components/` được dùng chung bởi các màn hình
+đăng nhập, đăng ký và thiết lập lần đầu. Các màn hình nghiệp vụ khác vẫn ở
+`app/ui/screens/` và không bị thay đổi trong lần chuyển này.
