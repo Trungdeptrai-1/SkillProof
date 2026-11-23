@@ -137,6 +137,7 @@ class MainWindow(QMainWindow):
 
         self._dashboard = DashboardScreen(user)
         self._dashboard.on_logout = self._on_logout
+        self._dashboard.on_open_candidate_profile = self._show_candidate_profile
         self._stack.addWidget(self._dashboard)
         self._stack.setCurrentWidget(self._dashboard)
 
