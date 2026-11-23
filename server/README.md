@@ -10,8 +10,8 @@ người dùng bằng `python main.py`.
 |---|---|---|
 | `database/` | Kết nối SQLite, schema và migration | `server/database/`; các import cũ trong `app/database/` được giữ tương thích |
 | `models/` | Đối tượng dữ liệu và DTO | `server/models/` và một số model nghiệp vụ trong services cũ |
-| `services/` | Nghiệp vụ ứng dụng và truy cập dữ liệu | Xác thực, đăng ký, thiết lập Admin và hồ sơ Candidate ở `server/services/`; một số nghiệp vụ hồ sơ Company/Expert, tìm kiếm, hợp đồng và nhiệm vụ vẫn ở `app/services/` |
-| `controllers/` | Điều phối yêu cầu từ View tới service | `server/controllers/` gồm auth, user, setup, profile và collaboration |
+| `services/` | Nghiệp vụ ứng dụng và truy cập dữ liệu | Xác thực, đăng ký, thiết lập Admin, hồ sơ Candidate và quản trị Admin ở `server/services/`; một số nghiệp vụ hồ sơ Company/Expert, tìm kiếm, hợp đồng và nhiệm vụ vẫn ở `app/services/` |
+| `controllers/` | Điều phối yêu cầu từ View tới service | `server/controllers/` gồm auth, user, setup, profile, collaboration và admin |
 
 `main.py` khởi tạo logging, tạo schema rồi khởi chạy `QApplication` và
 `MainWindow`. `MainWindow` điều phối điều hướng giao diện; View gọi controller,
@@ -23,7 +23,9 @@ những bản triển khai nghiệp vụ song song.
 
 - Không có HTTP listener hay tiến trình server riêng.
 - SQLite và migration hiện hữu được giữ nguyên; kiểm thử dùng database tạm.
-- Các menu Admin chưa có nghiệp vụ quản trị users, skills hoặc settings vẫn
-  là placeholder.
+- `AdminController` và `AdminService` hỗ trợ tìm/lọc tài khoản, khóa/mở khóa
+  tài khoản (bảo vệ Admin hoạt động cuối cùng), quản lý kỹ năng bằng trạng thái
+  kích hoạt và thống kê users/profiles/skills. Cấu hình ứng dụng vẫn chưa có
+  nghiệp vụ quản trị và tiếp tục là placeholder.
 - Chạy kiểm thử bằng `python -m pytest -q`; kiểm tra cú pháp bằng
   `python -m compileall -q app client server tests`.
