@@ -80,6 +80,9 @@ python -m pytest tests/ -q
 CI also runs syntax checks and the full pytest suite for pull requests to
 `main` and pushes to `main`. See [docs/CI_GUIDE.md](docs/CI_GUIDE.md).
 
+For verified demo flows and current feature limitations, see
+[docs/DEMO_GUIDE.md](docs/DEMO_GUIDE.md).
+
 ---
 
 ## Kiến trúc MVC hiện tại
