@@ -428,7 +428,8 @@ if inactive:    return ACCOUNT_INACTIVE                 # check active CUỐI c�
 
 ## 9. Migrations
 
-Schema được quản lý trong `app/database/schema.py`:
+Schema được quản lý trong `server/database/schema.py`; `app/database/schema.py`
+được giữ làm import tương thích:
 
 ```
 create_all_tables()
