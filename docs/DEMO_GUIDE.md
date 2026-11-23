@@ -1,66 +1,116 @@
 # SkillProof Demo Guide
 
-This guide describes what is currently implemented and what can be demonstrated
-without presenting placeholders as completed features.
+This guide covers verified application flows and calls out features that are
+not implemented. Use an isolated SQLite database for every demo.
 
-## Preparation
+## Prepare an isolated demo database
 
-- Use Python 3.13 and install dependencies with `pip install -r requirements.txt`.
-- Run `python main.py` from a disposable checkout or demo environment. Do not
-  replace or delete a user database to prepare a demo.
-- On a new database, complete the First-Run Setup form to create the initial
-  administrator. There is no default admin password.
-- Public registration creates Candidate accounts only. Company and Expert demo
-  accounts must already exist in the disposable QA/demo database; the UI has no
-  role-provisioning flow.
+In PowerShell, select a database under the Windows temporary directory before
+starting the app. The normal database path is unchanged when this variable is
+not set.
 
-## Verified UI flows
+```powershell
+$demoDir = Join-Path $env:TEMP "SkillProofDemo"
+New-Item -ItemType Directory -Force $demoDir | Out-Null
+$env:SKILLPROOF_DB_PATH = Join-Path $demoDir "skillproof.db"
+```
+
+Public registration creates Candidate accounts only. To demonstrate Company
+and Expert roles, seed those accounts in this disposable database before
+launching the application. This one-off setup is not an application feature and
+must never be run against the normal user database:
+
+```powershell
+$env:SKILLPROOF_DEMO_PASSWORD = Read-Host "Enter a strong temporary demo password"
+@'
+import os
+
+from app.utils.helpers import hash_password
+from server.database.connection import db
+from server.database.schema import create_all_tables
+
+create_all_tables()
+password_hash = hash_password(os.environ["SKILLPROOF_DEMO_PASSWORD"])
+for username, email, full_name, role in (
+    ("demo-company", "company-demo@example.test", "Demo Company", "company"),
+    ("demo-expert", "expert-demo@example.test", "Demo Expert", "expert"),
+):
+    db.execute(
+        """
+        INSERT OR IGNORE INTO users
+            (username, email, password, full_name, role, is_active)
+        VALUES (?, ?, ?, ?, ?, 1)
+        """,
+        (username, email, password_hash, full_name, role),
+    )
+db.close()
+'@ | python -
+Remove-Item Env:\SKILLPROOF_DEMO_PASSWORD
+```
+
+Start the app from the repository root while `SKILLPROOF_DB_PATH` remains set:
+
+```powershell
+python main.py
+```
+
+The first launch displays First-Run Setup. Create an Admin account there; no
+default Admin password exists. Keep the temporary database until the demo is
+finished, then remove only the named `SkillProofDemo` directory under `$env:TEMP`.
+
+## Verified flows
+
+### Admin
+
+1. Sign in with the Admin account created by First-Run Setup.
+2. The dashboard loads real user, profile, and skill counts from SQLite.
+3. Open **Người dùng** to search by username/name/email, filter by role and
+   status, and lock or unlock an account. A deleted account is not listed, and
+   the last active Admin cannot be locked.
+4. Open **Danh mục kỹ năng** to add or edit a skill, or deactivate/reactivate
+   it. The current service does not provide physical deletion.
+5. Sign out; Admin operations require a logged-in, active Admin session.
 
 ### Candidate
 
 1. From Welcome, open Login and choose Register.
 2. Register a Candidate, return to Login, and sign in.
 3. Open **Hồ sơ cá nhân**, create the profile, then edit and save it.
-4. Choose **Đăng xuất**; the session ends and Login is shown. Sign in again to
-   verify the session can be established again.
+4. Choose **Đăng xuất**, then sign in again to verify a new session.
 
-### Company and Expert profiles
+### Company and Expert
 
-1. Sign in using an existing Company or Expert account.
+1. Sign in using the temporary accounts prepared above.
 2. From the role dashboard, open **Hồ sơ doanh nghiệp** or
-   **Hồ sơ chuyên gia**.
-3. Create and then edit the profile; use **Quay lại Dashboard** to return.
+   **Hồ sơ chuyên gia**; create or edit the profile and return to Dashboard.
+3. As Company, open **Tìm chuyên gia**, search and send an invitation.
+4. Open **Hợp đồng của tôi** to review invitations and contract status. Sign in
+   as the Expert to accept or reject a pending invitation.
+5. After a contract is active, Company can create a task. Expert can start and
+   complete the assigned task. Return to Dashboard and sign out from either
+   role when finished.
 
-The profile screens and role checks are implemented. The dashboard's other
-Company/Expert menu entries are not connected to their screens.
+Role checks and writes are enforced by the corresponding Controllers and
+Services. The UI displays operation errors rather than substituting demo data.
+Company/Expert registration and Admin account creation after first-run setup
+are not currently available in the UI.
 
-## Implemented domain flows not yet reachable from the dashboard
+## Not implemented or still limited
 
-- Company expert search and invitations are implemented in the search screen
-  and service.
-- Company/Expert contract transitions and Company-created / Expert-completed
-  tasks are implemented and covered by controller/service integration tests.
-- MainWindow contains some search/contract/task routes, but the dashboard does
-  not currently expose entry points to all of them. Do not claim these are
-  end-to-end GUI demo flows until the navigation is connected.
-
-## Not implemented
-
-- Job-posting and candidate recruitment workflow.
-- End-user skill exams, grading, interview evaluation, certificate issuance,
-  or certificate verification. Related database tables and task references do
-  not by themselves implement these workflows.
-- Admin user/role management, skill management, or system settings. Admin
-  currently has first-run account setup and a placeholder dashboard.
-- Instructor and Student dashboards beyond role-specific placeholder content.
+- Admin settings, job posting/recruitment, skill exams, grading, interview
+  evaluation, certificate issuance, and certificate verification.
+- Instructor and Student workspaces beyond placeholder dashboard content.
+- Physical skill deletion; use the supported deactivate/reactivate action.
+- Company/Expert role provisioning through public registration; use only the
+  isolated demo database setup above for demo accounts.
 
 ## Verification commands
 
 ```powershell
+$env:QT_QPA_PLATFORM = "offscreen"
 python -m pytest -q
 python -m compileall -q app client server tests main.py
 ```
 
-Tests use temporary SQLite databases. The desktop startup smoke test should
-also use a temporary database and `QT_QPA_PLATFORM=offscreen` in CI; it does
-not replace an interactive Windows acceptance run.
+Tests and smoke tests use temporary SQLite databases. An offscreen startup
+smoke test does not replace an interactive Windows acceptance run.

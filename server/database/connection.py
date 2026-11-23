@@ -28,7 +28,8 @@ class DatabaseConnection:
     def connect(self) -> sqlite3.Connection:
         """Mở kết nối tới CSDL, tạo file nếu chưa tồn tại."""
         if self._connection is None:
-            os.makedirs(DATA_DIR, exist_ok=True)
+            database_dir = os.path.dirname(os.path.abspath(DB_PATH)) or DATA_DIR
+            os.makedirs(database_dir, exist_ok=True)
             self._connection = sqlite3.connect(
                 DB_PATH,
                 check_same_thread=False,

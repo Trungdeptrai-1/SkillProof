@@ -79,14 +79,17 @@ nghiệp vụ tài khoản hay hồ sơ.
 | Đăng ký Candidate | `client.views.RegisterScreen` | `UserController` | `UserService`, `UserModel` |
 | Login / Logout | `client.views.LoginScreen`, Dashboard | `AuthController` | `AuthService`, `SessionManager`, `UserModel` |
 | Hồ sơ Candidate | `client.views.CandidateProfileScreen` | `CandidateProfileController` | Candidate profile service/DTO |
-| Hồ sơ Company / Expert | Profile screens trong `app/ui/screens/` | `CompanyProfileController`, `ExpertProfileController` | Profile services/DTO |
+| Hồ sơ Company / Expert | Profile screens trong `client/views/` | `CompanyProfileController`, `ExpertProfileController` | Profile services/DTO |
 | Tìm chuyên gia, hợp đồng, nhiệm vụ | Search/Contract/Task screens | Collaboration controllers | Search/Contract/Task services/DTO |
+| Dashboard Admin | `AdminDashboardScreen` | `AdminController` | `AdminService`, thống kê SQLite |
+| Quản lý tài khoản Admin | `UserManagementScreen` | `AdminController` | Tìm/lọc, khóa/mở khóa; bảo vệ Admin hoạt động cuối |
+| Quản lý kỹ năng Admin | `SkillManagementScreen` | `AdminController` | Thêm/sửa/kích hoạt/ngừng sử dụng |
 | Điều hướng | `MainWindow` + dashboard callbacks | `MainWindow` điều phối màn hình | Không chứa nghiệp vụ domain |
 
-Dashboard Candidate, Company và Expert mở được màn hình hồ sơ đã có. Những
-menu Admin (quản lý người dùng/kỹ năng/cài đặt), cùng các mục nghiệp vụ chưa
-có màn hình hoặc service tương ứng, vẫn là placeholder; không giả định đã
-triển khai.
+Dashboard Candidate, Company và Expert mở được các màn hình nghiệp vụ đã có.
+Admin statistics, user management và skill management đi qua Controller tới
+Service; settings chưa có nghiệp vụ. Các luồng job/recruitment, assessment,
+grading và certificate chưa được triển khai.
 
 ### 2.3 Phân công bốn thành viên
 
@@ -475,10 +478,12 @@ create_all_tables()
 - [x] Test suite cho authentication, session, migrations và regression
 
 ### Giai đoạn 02 — Dashboard nghiệp vụ theo vai trò
-- [ ] AdminDashboard — quản lý users, skills, settings
+- [x] AdminDashboard — thống kê, tìm/lọc và khóa/mở khóa users; thêm/sửa/
+      kích hoạt/ngừng sử dụng skills
+- [ ] Admin settings
 - [ ] CandidateDashboard — hồ sơ, kỹ năng, chứng chỉ
-- [ ] CompanyDashboard — tìm kiếm, xác minh
-- [ ] ExpertDashboard — đánh giá, cấp chứng nhận
+- [x] CompanyDashboard — hồ sơ, tìm chuyên gia, lời mời, hợp đồng và task
+- [ ] ExpertDashboard — hồ sơ, hợp đồng và task (đánh giá/cấp chứng nhận chưa có)
 - [ ] InstructorDashboard — khoá học, học viên
 - [ ] StudentDashboard — đăng ký, tiến độ
 

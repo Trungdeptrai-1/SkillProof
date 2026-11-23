@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Protocol
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QComboBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -24,7 +26,7 @@ from app.utils.constants import (
     COLOR_LIGHT_GRAY,
     COLOR_NAVY_DARK,
     COLOR_OFF_WHITE,
-    COLOR_TEXT_DARK,
+    COLOR_SUCCESS,
     COLOR_TEXT_MUTED,
     COLOR_WHITE,
     WINDOW_MIN_HEIGHT,
@@ -46,16 +48,34 @@ class UserActionResult:
     message: str = ""
 
 
+class UserListResponse(Protocol):
+    success: bool
+    users: Sequence[UserModel]
+    message: str
+
+
+class UserActionResponse(Protocol):
+    success: bool
+    message: str
+
+
 class UserManagementController(Protocol):
-    """Expected API for a future admin user-management Controller."""
+    """Controller operations required by the user-management view."""
 
-    def list_users(self) -> UserListResult: ...
+    def list_users(
+        self,
+        search: str = "",
+        role: str | None = None,
+        is_active: bool | None = None,
+    ) -> UserListResponse: ...
 
-    def set_user_active(self, user_id: int, is_active: bool) -> UserActionResult: ...
+    def set_user_active(
+        self, user_id: int, is_active: bool
+    ) -> UserActionResponse: ...
 
 
 class UserManagementScreen(QWidget):
-    """Browse and activate/deactivate users when a real Controller is supplied."""
+    """Browse and activate/deactivate users through an admin Controller."""
 
     def __init__(
         self,
@@ -66,7 +86,7 @@ class UserManagementScreen(QWidget):
         self.setMinimumSize(WINDOW_MIN_WIDTH, WINDOW_MIN_HEIGHT)
         self._controller = controller
         self._on_back_cb = None
-        self._users: tuple[UserModel, ...] = ()
+        self._users: Sequence[UserModel] = ()
         self._setup_ui()
         if self._controller is None:
             self._set_unavailable()
@@ -101,8 +121,8 @@ class UserManagementScreen(QWidget):
         layout.addLayout(header)
 
         subtitle = QLabel(
-            "Danh sách và trạng thái tài khoản; các thao tác cần Controller "
-            "quản trị người dùng."
+            "Tìm và lọc tài khoản theo tên, vai trò hoặc trạng thái; khóa hay "
+            "mở khóa tài khoản qua Admin Controller."
         )
         subtitle.setWordWrap(True)
         subtitle.setStyleSheet(f"color:{COLOR_TEXT_MUTED};font-size:13px;")
@@ -118,9 +138,25 @@ class UserManagementScreen(QWidget):
 
         controls = QHBoxLayout()
         self._search_input = QLineEdit()
-        self._search_input.setPlaceholderText("Lọc theo tên, email hoặc vai trò")
+        self._search_input.setPlaceholderText("Tìm theo tên, email hoặc tên đăng nhập")
         self._search_input.setFixedHeight(38)
-        self._search_input.textChanged.connect(self._apply_filter)
+        self._search_input.textChanged.connect(
+            lambda _text: self.refresh()
+        )
+        self._role_filter = QComboBox()
+        self._role_filter.addItem("Tất cả vai trò", None)
+        for role, label in ROLE_LABELS.items():
+            self._role_filter.addItem(label, role)
+        self._role_filter.currentIndexChanged.connect(
+            lambda _index: self.refresh()
+        )
+        self._status_filter = QComboBox()
+        self._status_filter.addItem("Mọi trạng thái", None)
+        self._status_filter.addItem("Đang hoạt động", True)
+        self._status_filter.addItem("Đã khóa", False)
+        self._status_filter.currentIndexChanged.connect(
+            lambda _index: self.refresh()
+        )
         self._refresh_button = QPushButton("Tải lại")
         self._refresh_button.setStyleSheet(secondary_button_style(font_size=12))
         self._refresh_button.clicked.connect(self.refresh)
@@ -130,6 +166,8 @@ class UserManagementScreen(QWidget):
         )
         self._toggle_active_button.clicked.connect(self._toggle_selected_user)
         controls.addWidget(self._search_input, stretch=1)
+        controls.addWidget(self._role_filter)
+        controls.addWidget(self._status_filter)
         controls.addWidget(self._refresh_button)
         controls.addWidget(self._toggle_active_button)
         layout.addLayout(controls)
@@ -153,12 +191,13 @@ class UserManagementScreen(QWidget):
 
     def _set_unavailable(self) -> None:
         self._show_error(
-            "Chưa có User Management Controller để tải hoặc thay đổi tài khoản. "
-            "Không hiển thị dữ liệu giả; tích hợp Controller trước khi dùng "
-            "các thao tác quản trị."
+            "Admin Controller chưa được cung cấp; dữ liệu và thao tác quản trị "
+            "không khả dụng."
         )
         self._table.setEnabled(False)
         self._search_input.setEnabled(False)
+        self._role_filter.setEnabled(False)
+        self._status_filter.setEnabled(False)
         self._refresh_button.setEnabled(False)
         self._toggle_active_button.setEnabled(False)
 
@@ -167,7 +206,11 @@ class UserManagementScreen(QWidget):
             self._set_unavailable()
             return
 
-        result = self._controller.list_users()
+        result = self._controller.list_users(
+            search=self._search_input.text(),
+            role=self._role_filter.currentData(),
+            is_active=self._status_filter.currentData(),
+        )
         self._table.clearContents()
         self._table.setRowCount(0)
         self._users = ()
@@ -182,7 +225,7 @@ class UserManagementScreen(QWidget):
         self._status_label.setText(
             f"Đã tải {len(self._users)} tài khoản."
             if self._users
-            else "Controller trả về danh sách rỗng."
+            else "Không tìm thấy tài khoản phù hợp."
         )
         self._status_label.setStyleSheet(
             f"color:{COLOR_TEXT_MUTED};background:{COLOR_WHITE};"
@@ -206,18 +249,7 @@ class UserManagementScreen(QWidget):
                 if column == 0:
                     item.setData(Qt.ItemDataRole.UserRole, user.id)
                 self._table.setItem(row, column, item)
-        self._apply_filter(self._search_input.text())
         self._selection_changed()
-
-    def _apply_filter(self, query: str) -> None:
-        needle = query.strip().casefold()
-        for row in range(self._table.rowCount()):
-            searchable = " ".join(
-                self._table.item(row, column).text()
-                for column in range(1, self._table.columnCount())
-                if self._table.item(row, column) is not None
-            )
-            self._table.setRowHidden(row, needle not in searchable.casefold())
 
     def _selection_changed(self) -> None:
         row = self._table.currentRow()
@@ -264,11 +296,20 @@ class UserManagementScreen(QWidget):
             )
             return
         self.refresh()
+        status = "mở khóa" if not user.is_active else "khóa"
+        self._show_success(f"Đã {status} tài khoản {user.email}.")
 
     def _show_error(self, message: str) -> None:
         self._status_label.setStyleSheet(
             f"color:{COLOR_ERROR};background:{COLOR_WHITE};"
             "border:1px solid #F1C7C7;border-radius:8px;padding:12px;"
+        )
+        self._status_label.setText(message)
+
+    def _show_success(self, message: str) -> None:
+        self._status_label.setStyleSheet(
+            f"color:{COLOR_SUCCESS};background:{COLOR_WHITE};"
+            f"border:1px solid {COLOR_LIGHT_GRAY};border-radius:8px;padding:12px;"
         )
         self._status_label.setText(message)
 

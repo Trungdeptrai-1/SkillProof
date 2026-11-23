@@ -88,8 +88,15 @@ class _UserManagementControllerMock:
         ]
         self.actions = []
 
-    def list_users(self):
-        return UserListResult(True, tuple(self.users))
+    def list_users(self, search="", role=None, is_active=None):
+        users = [
+            user
+            for user in self.users
+            if (not search or search.casefold() in user.display_name.casefold())
+            and (role is None or user.role == role)
+            and (is_active is None or user.is_active is is_active)
+        ]
+        return UserListResult(True, tuple(users))
 
     def set_user_active(self, user_id, is_active):
         self.actions.append((user_id, is_active))
@@ -104,8 +111,17 @@ class _SkillManagementControllerMock:
     def __init__(self):
         self.skills = []
 
-    def list_skills(self):
-        return SkillListResult(True, tuple(self.skills))
+    def list_skills(self, search=""):
+        skills = [
+            skill
+            for skill in self.skills
+            if not search
+            or search.casefold()
+            in " ".join(
+                (skill.name, skill.description or "", skill.category or "")
+            ).casefold()
+        ]
+        return SkillListResult(True, tuple(skills))
 
     def create_skill(self, name, category, level, description):
         skill = SkillModel(
@@ -145,7 +161,7 @@ class _SkillManagementControllerMock:
         return SkillActionResult(True, skill)
 
 
-def test_admin_dashboard_routes_and_unavailable_views_are_explicit(
+def test_admin_dashboard_routes_and_admin_features_use_real_controller(
     monkeypatch, fresh_db, admin_user
 ):
     from app.database import schema
@@ -153,6 +169,45 @@ def test_admin_dashboard_routes_and_unavailable_views_are_explicit(
 
     app = _qt_app()
     monkeypatch.setattr(schema, "is_first_run", lambda: False)
+    candidate_credentials = _insert_user(
+        fresh_db, "candidate_ui", "candidate-ui@example.com",
+        "candidate", "Candidate UI"
+    )
+    candidate_email = candidate_credentials[0]
+    company_credentials = _insert_user(
+        fresh_db, "company_ui", "company-ui@example.com",
+        "company", "Company UI"
+    )
+    company_email = company_credentials[0]
+    expert_email, _ = _insert_user(
+        fresh_db, "expert_ui", "expert-ui@example.com",
+        "expert", "Expert UI"
+    )
+    candidate_id = fresh_db.fetchone(
+        "SELECT id FROM users WHERE email = ?", (candidate_email,)
+    )["id"]
+    company_id = fresh_db.fetchone(
+        "SELECT id FROM users WHERE email = ?", (company_email,)
+    )["id"]
+    expert_id = fresh_db.fetchone(
+        "SELECT id FROM users WHERE email = ?", (expert_email,)
+    )["id"]
+    fresh_db.execute(
+        "INSERT INTO candidate_profiles(user_id, headline) VALUES (?, ?)",
+        (candidate_id, "Candidate profile"),
+    )
+    fresh_db.execute(
+        "INSERT INTO company_profiles(user_id, company_name) VALUES (?, ?)",
+        (company_id, "Company profile"),
+    )
+    fresh_db.execute(
+        "INSERT INTO expert_profiles(user_id, title) VALUES (?, ?)",
+        (expert_id, "Expert profile"),
+    )
+    fresh_db.execute(
+        "INSERT INTO skills(name, category, level) VALUES (?, ?, ?)",
+        ("Existing skill", "Engineering", "beginner"),
+    )
     auth = AuthController()
     login = auth.login(*admin_user)
     assert login.success
@@ -160,32 +215,83 @@ def test_admin_dashboard_routes_and_unavailable_views_are_explicit(
     window = MainWindow()
     window._show_dashboard(login.user)
     assert isinstance(window._dashboard, AdminDashboardScreen)
+    assert (
+        "Tổng chưa xóa: 4"
+        in window._dashboard._users_statistics_label.text()
+    )
+    assert "Candidate: 1" in window._dashboard._profiles_statistics_label.text()
+    assert "Tổng: 1" in window._dashboard._skills_statistics_label.text()
 
     window._dashboard._users_card_button.click()
     users = window._user_management
     assert isinstance(users, UserManagementScreen)
     assert window._stack.currentWidget() is users
-    assert users._table.rowCount() == 0
-    assert not users._refresh_button.isEnabled()
-    assert "Controller" in users._status_label.text()
+    assert users._table.rowCount() == 4
+    users._role_filter.setCurrentIndex(users._role_filter.findData("candidate"))
+    assert users._table.rowCount() == 1
+    users._table.selectRow(0)
+    users._toggle_active_button.click()
+    assert fresh_db.fetchone(
+        "SELECT is_active FROM users WHERE email = ?", (candidate_email,)
+    )["is_active"] == 0
+    assert "Đã khóa tài khoản" in users._status_label.text()
+    users._status_filter.setCurrentIndex(users._status_filter.findData(False))
+    assert users._table.rowCount() == 1
+    users._table.selectRow(0)
+    assert users._toggle_active_button.text() == "Mở khoá tài khoản"
+    users._toggle_active_button.click()
+    assert fresh_db.fetchone(
+        "SELECT is_active FROM users WHERE email = ?", (candidate_email,)
+    )["is_active"] == 1
+    assert "Đã mở khóa tài khoản" in users._status_label.text()
     users._back_button.click()
 
     window._dashboard._skills_card_button.click()
     skills = window._skill_management
     assert isinstance(skills, SkillManagementScreen)
     assert window._stack.currentWidget() is skills
-    assert skills._table.rowCount() == 0
-    assert not skills._save_button.isEnabled()
-    assert "Controller" in skills._status_label.text()
+    assert skills._table.rowCount() == 1
+    skills._name_input.setText("Python")
+    skills._category_input.setText("Engineering")
+    skills._description_input.setPlainText("Programming language")
+    skills._level_combo.setCurrentIndex(skills._level_combo.findData("advanced"))
+    skills._save_button.click()
+    assert skills._table.rowCount() == 2
+    assert "Đã thêm kỹ năng 'Python'" in skills._status_label.text()
+
+    python_row = next(
+        row
+        for row in range(skills._table.rowCount())
+        if skills._table.item(row, 1).text() == "Python"
+    )
+    skills._table.selectRow(python_row)
+    skills._edit_button.click()
+    skills._name_input.setText("Python Advanced")
+    skills._save_button.click()
+    assert fresh_db.fetchone(
+        "SELECT name FROM skills WHERE name = 'Python Advanced'"
+    ) is not None
+    assert "Đã cập nhật kỹ năng" in skills._status_label.text()
+
+    python_row = next(
+        row
+        for row in range(skills._table.rowCount())
+        if skills._table.item(row, 1).text() == "Python Advanced"
+    )
+    skills._table.selectRow(python_row)
+    skills._toggle_active_button.click()
+    assert fresh_db.fetchone(
+        "SELECT is_active FROM skills WHERE name = 'Python Advanced'"
+    )["is_active"] == 0
+    assert "Đã ngừng sử dụng kỹ năng" in skills._status_label.text()
+    skills._back_button.click()
+    window._dashboard._refresh_statistics_button.click()
+    assert "Tổng: 2" in window._dashboard._skills_statistics_label.text()
 
     auth.logout()
-    candidate_credentials = _insert_user(
-        fresh_db, "candidate_ui", "candidate-ui@example.com",
-        "candidate", "Candidate UI"
-    )
-    candidate_login = auth.login(*candidate_credentials)
-    assert candidate_login.success
-    window._show_dashboard(candidate_login.user)
+    company_login = auth.login(*company_credentials)
+    assert company_login.success
+    window._show_dashboard(company_login.user)
     dashboard = window._dashboard
     assert isinstance(dashboard, DashboardScreen)
     window._show_user_management()
@@ -208,13 +314,14 @@ def test_user_management_view_uses_injected_controller_and_filters():
     assert screen._table.item(0, 1).text() == "Demo Candidate"
 
     screen._search_input.setText("missing")
-    assert screen._table.isRowHidden(0)
+    assert screen._table.rowCount() == 0
     screen._search_input.clear()
     screen._table.selectRow(0)
     screen._toggle_active_button.click()
 
     assert controller.actions == [(7, False)]
     assert screen._table.item(0, 4).text() == "Đã khoá"
+    assert "Đã khóa tài khoản" in screen._status_label.text()
     screen.close()
     app.processEvents()
 
