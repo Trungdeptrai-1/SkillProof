@@ -100,10 +100,10 @@ main.py → MainWindow → View (client/views or app/ui/screens)
                          → Model / Database → SQLite
 ```
 
-- **View:** `client/views/` chứa welcome, login, registration, dashboard và
-  Candidate profile; Company/Expert profile, tìm kiếm, hợp đồng, nhiệm vụ và
-  thiết lập lần đầu vẫn ở `app/ui/screens/`. `MainWindow` ở `app/ui/` điều phối
-  navigation.
+- **View:** `client/views/` chứa welcome, login, registration, các dashboard,
+  hồ sơ Candidate/Company/Expert, tìm kiếm, hợp đồng, nhiệm vụ và quản trị
+  Admin. `app/ui/screens/` giữ các import tương thích. `MainWindow` ở `app/ui/`
+  điều phối navigation.
 - **Controller:** `server/controllers/` điều phối xác thực, đăng ký, setup,
   profile, tìm chuyên gia, hợp đồng và nhiệm vụ.
 - **Service:** Auth, user registration, setup và Candidate profile ở
@@ -112,8 +112,12 @@ main.py → MainWindow → View (client/views or app/ui/screens)
 - **Model/database:** model người dùng ở `server/models/`; SQLite connection,
   schema và migration ở `server/database/`. Các import cũ trong `app/` được
   giữ làm compatibility wrappers.
-- Các mục nghiệp vụ Admin chưa có implementation vẫn là placeholder; dashboard
-  Company/Expert có thể mở các màn hình hồ sơ đã tồn tại.
+- Admin hiện có thống kê, tìm/lọc tài khoản, khóa/mở khóa, và thêm/sửa/
+  ngừng sử dụng kỹ năng. Cài đặt Admin và các nghiệp vụ tuyển dụng, đánh giá,
+  chứng chỉ chưa được triển khai.
+- Dashboard Company/Expert mở được hồ sơ, tìm kiếm chuyên gia, hợp đồng và
+  nhiệm vụ; việc tạo Company/Expert account vẫn cần dữ liệu demo được chuẩn bị
+  riêng trong database tạm.
 
 | Thành viên | Phạm vi |
 |---|---|
@@ -137,18 +141,18 @@ SkillProof_New/
 │
 ├── server/                     # Tầng ứng dụng/dữ liệu (không phải web server)
 │   ├── controllers/            # Điều phối View ↔ Service
-│   ├── services/               # Auth, registration, setup, Candidate profile
-│   ├── models/                 # UserModel
+│   ├── services/               # Auth, registration, setup, Admin workflows
+│   ├── models/                 # UserModel, SkillModel, admin DTOs
 │   └── database/               # SQLite, schema và migrations
 ├── client/                     # PySide6 desktop views
-│   ├── views/                  # Welcome, auth, dashboard, Candidate profile
+│   ├── views/                  # Auth, role dashboards, profiles, collaboration, Admin
 │   ├── components/             # Widget dùng lại
 │   └── assets/
-├── docs/                       # Team assignments, CI guide
+├── docs/                       # Team assignments, CI guide, demo guide
 │
 ├── app/                        # Compatibility modules và màn hình nghiệp vụ khác
 │   ├── ui/
-│   │   ├── screens/            # Profile, collaboration, setup và wrappers
+│   │   ├── screens/            # Compatibility wrappers cho client.views
 │   │   ├── components/         # Widget tái sử dụng
 │   │   ├── dialogs/            # Hộp thoại
 │   │   └── main_window.py      # Cửa sổ chính

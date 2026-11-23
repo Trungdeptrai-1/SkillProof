@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -26,6 +27,7 @@ from app.utils.constants import (
     COLOR_LIGHT_GRAY,
     COLOR_NAVY_DARK,
     COLOR_OFF_WHITE,
+    COLOR_SUCCESS,
     COLOR_TEXT_MUTED,
     COLOR_WHITE,
     WINDOW_MIN_HEIGHT,
@@ -51,31 +53,57 @@ class SkillActionResult:
     message: str = ""
 
 
-class SkillManagementController(Protocol):
-    """Expected API for a future skill-catalog Controller."""
+class SkillRecord(Protocol):
+    id: int
+    name: str
+    description: str | None
+    category: str | None
+    level: str
+    is_active: bool
+    created_at: str
 
-    def list_skills(self) -> SkillListResult: ...
+
+class SkillListResponse(Protocol):
+    success: bool
+    skills: Sequence[SkillRecord]
+    message: str
+
+
+class SkillActionResponse(Protocol):
+    success: bool
+    skill: SkillRecord | None
+    message: str
+
+
+class SkillManagementController(Protocol):
+    """Controller operations required by the skill-management view."""
+
+    def list_skills(self, search: str = "") -> SkillListResponse: ...
 
     def create_skill(
-        self, name: str, category: str, level: str, description: str
-    ) -> SkillActionResult: ...
+        self,
+        name: str,
+        description: str = "",
+        category: str = "",
+        level: str = "beginner",
+    ) -> SkillActionResponse: ...
 
     def update_skill(
         self,
         skill_id: int,
         name: str,
-        category: str,
-        level: str,
-        description: str,
-    ) -> SkillActionResult: ...
+        description: str = "",
+        category: str = "",
+        level: str = "beginner",
+    ) -> SkillActionResponse: ...
 
     def set_skill_active(
         self, skill_id: int, is_active: bool
-    ) -> SkillActionResult: ...
+    ) -> SkillActionResponse: ...
 
 
 class SkillManagementScreen(QWidget):
-    """Edit a skill catalog only when the host injects a real Controller."""
+    """Edit a skill catalog through an admin Controller."""
 
     def __init__(
         self,
@@ -86,7 +114,7 @@ class SkillManagementScreen(QWidget):
         self.setMinimumSize(WINDOW_MIN_WIDTH, WINDOW_MIN_HEIGHT)
         self._controller = controller
         self._on_back_cb = None
-        self._skills: tuple[SkillModel, ...] = ()
+        self._skills: Sequence[SkillRecord] = ()
         self._editing_skill_id: int | None = None
         self._setup_ui()
         if self._controller is None:
@@ -122,8 +150,8 @@ class SkillManagementScreen(QWidget):
         layout.addLayout(header)
 
         subtitle = QLabel(
-            "Danh mục có trong schema SQLite; chưa có Skill Controller để "
-            "đọc hoặc lưu dữ liệu thật."
+            "Quản lý danh mục kỹ năng qua Admin Controller; có thể ngừng sử "
+            "dụng thay vì xóa vật lý."
         )
         subtitle.setWordWrap(True)
         subtitle.setStyleSheet(f"color:{COLOR_TEXT_MUTED};font-size:13px;")
@@ -136,6 +164,13 @@ class SkillManagementScreen(QWidget):
             "border:1px solid #F1C7C7;border-radius:8px;padding:10px;"
         )
         layout.addWidget(self._status_label)
+
+        self._search_input = QLineEdit()
+        self._search_input.setPlaceholderText("Tìm theo tên, mô tả hoặc danh mục")
+        self._search_input.textChanged.connect(
+            lambda _text: self.refresh()
+        )
+        layout.addWidget(self._search_input)
 
         content = QHBoxLayout()
         content.setSpacing(16)
@@ -210,11 +245,12 @@ class SkillManagementScreen(QWidget):
 
     def _set_unavailable(self) -> None:
         self._show_error(
-            "Skill Management Controller chưa được cung cấp. Các thao tác "
-            "được khoá và danh sách không chứa dữ liệu giả."
+            "Admin Controller chưa được cung cấp; dữ liệu và thao tác kỹ năng "
+            "không khả dụng."
         )
         self._table.setEnabled(False)
         for widget in (
+            self._search_input,
             self._name_input,
             self._category_input,
             self._level_combo,
@@ -232,7 +268,9 @@ class SkillManagementScreen(QWidget):
             self._set_unavailable()
             return
 
-        result = self._controller.list_skills()
+        result = self._controller.list_skills(
+            search=self._search_input.text()
+        )
         self._skills = ()
         self._table.clearContents()
         self._table.setRowCount(0)
@@ -250,7 +288,7 @@ class SkillManagementScreen(QWidget):
         self._status_label.setText(
             f"Đã tải {len(self._skills)} kỹ năng."
             if self._skills
-            else "Danh mục kỹ năng đang trống."
+            else "Không tìm thấy kỹ năng phù hợp."
         )
         self._table.setRowCount(len(self._skills))
         for row, skill in enumerate(self._skills):
@@ -268,7 +306,7 @@ class SkillManagementScreen(QWidget):
                 self._table.setItem(row, column, item)
         self._selection_changed()
 
-    def _selected_skill(self) -> SkillModel | None:
+    def _selected_skill(self) -> SkillRecord | None:
         row = self._table.currentRow()
         if row < 0:
             return None
@@ -315,13 +353,21 @@ class SkillManagementScreen(QWidget):
         if not level:
             self._show_error("Chọn cấp độ kỹ năng hợp lệ.")
             return
+        was_editing = self._editing_skill_id is not None
         if self._editing_skill_id is None:
             result = self._controller.create_skill(
-                name, category, level, description
+                name=name,
+                description=description,
+                category=category,
+                level=level,
             )
         else:
             result = self._controller.update_skill(
-                self._editing_skill_id, name, category, level, description
+                self._editing_skill_id,
+                name=name,
+                description=description,
+                category=category,
+                level=level,
             )
         if not result.success:
             self._show_error(
@@ -331,6 +377,8 @@ class SkillManagementScreen(QWidget):
         self._editing_skill_id = None
         self._clear_form()
         self.refresh()
+        action = "cập nhật" if was_editing else "thêm"
+        self._show_success(f"Đã {action} kỹ năng '{name}'.")
 
     def _toggle_active(self) -> None:
         skill = self._selected_skill()
@@ -345,11 +393,20 @@ class SkillManagementScreen(QWidget):
             )
             return
         self.refresh()
+        status = "kích hoạt" if not skill.is_active else "ngừng sử dụng"
+        self._show_success(f"Đã {status} kỹ năng '{skill.name}'.")
 
     def _show_error(self, message: str) -> None:
         self._status_label.setStyleSheet(
             f"color:{COLOR_ERROR};background:{COLOR_WHITE};"
             "border:1px solid #F1C7C7;border-radius:8px;padding:10px;"
+        )
+        self._status_label.setText(message)
+
+    def _show_success(self, message: str) -> None:
+        self._status_label.setStyleSheet(
+            f"color:{COLOR_SUCCESS};background:{COLOR_WHITE};"
+            f"border:1px solid {COLOR_LIGHT_GRAY};border-radius:8px;padding:10px;"
         )
         self._status_label.setText(message)
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from typing import Protocol
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
@@ -31,13 +32,42 @@ from app.utils.constants import (
 from app.utils.styles import primary_button_style
 
 
-class AdminDashboardScreen(QWidget):
-    """Admin dashboard. Metrics are omitted until backed by real controllers."""
+class AdminStatisticsData(Protocol):
+    total_users: int
+    active_users: int
+    inactive_users: int
+    deleted_users: int
+    candidate_profiles: int
+    company_profiles: int
+    expert_profiles: int
+    total_skills: int
+    active_skills: int
+    inactive_skills: int
 
-    def __init__(self, user: UserModel, parent: QWidget | None = None) -> None:
+
+class AdminStatisticsResult(Protocol):
+    success: bool
+    message: str
+    statistics: AdminStatisticsData | None
+
+
+class AdminDashboardController(Protocol):
+    def get_statistics(self) -> AdminStatisticsResult: ...
+
+
+class AdminDashboardScreen(QWidget):
+    """Admin dashboard backed by the administrator Controller."""
+
+    def __init__(
+        self,
+        user: UserModel,
+        parent: QWidget | None = None,
+        controller: AdminDashboardController | None = None,
+    ) -> None:
         super().__init__(parent)
         self.setMinimumSize(WINDOW_MIN_WIDTH, WINDOW_MIN_HEIGHT)
         self._user = user
+        self._controller = controller
         self._on_logout_cb: Callable[[], None] | None = None
         self._on_open_users_cb: Callable[[], None] | None = None
         self._on_open_skills_cb: Callable[[], None] | None = None
@@ -101,19 +131,50 @@ class AdminDashboardScreen(QWidget):
         header_layout.addWidget(greeting)
         header_layout.addWidget(title)
         header_layout.addWidget(subtitle)
+        self._statistics_status = QLabel("")
+        self._statistics_status.setWordWrap(True)
+        header_layout.addWidget(self._statistics_status)
+        self._refresh_statistics_button = QPushButton("Làm mới thống kê")
+        self._refresh_statistics_button.setCursor(
+            Qt.CursorShape.PointingHandCursor
+        )
+        self._refresh_statistics_button.setStyleSheet(
+            primary_button_style(font_size=12, padding="8px 14px")
+        )
+        self._refresh_statistics_button.clicked.connect(self.refresh_statistics)
+        header_layout.addWidget(
+            self._refresh_statistics_button,
+            alignment=Qt.AlignmentFlag.AlignLeft,
+        )
         content_layout.addWidget(header)
+
+        statistics = QHBoxLayout()
+        statistics.setSpacing(16)
+        users_statistics, self._users_statistics_label = self._statistics_card(
+            "Tài khoản"
+        )
+        profiles_statistics, self._profiles_statistics_label = (
+            self._statistics_card("Hồ sơ")
+        )
+        skills_statistics, self._skills_statistics_label = self._statistics_card(
+            "Kỹ năng"
+        )
+        statistics.addWidget(users_statistics)
+        statistics.addWidget(profiles_statistics)
+        statistics.addWidget(skills_statistics)
+        content_layout.addLayout(statistics)
 
         cards = QHBoxLayout()
         cards.setSpacing(16)
         users_card, self._users_card_button = self._action_card(
             "Quản lý người dùng",
-            "Danh sách và trạng thái tài khoản sẽ lấy dữ liệu từ User Management Controller.",
+            "Tìm, lọc và cập nhật trạng thái tài khoản.",
             "Mở giao diện",
             self._open_users,
         )
         skills_card, self._skills_card_button = self._action_card(
             "Quản lý kỹ năng",
-            "Schema có danh mục kỹ năng; chưa có Skill Controller để đọc hoặc lưu dữ liệu.",
+            "Tạo, chỉnh sửa và kích hoạt hoặc ngừng sử dụng kỹ năng.",
             "Mở giao diện",
             self._open_skills,
         )
@@ -122,8 +183,8 @@ class AdminDashboardScreen(QWidget):
         content_layout.addLayout(cards)
 
         note = QLabel(
-            "Không có số liệu thống kê giả. Các chức năng chưa có Controller "
-            "được đánh dấu rõ trong màn hình tương ứng."
+            "Thống kê và danh sách được tải từ dữ liệu SQLite qua Admin "
+            "Controller. Kỹ năng được ngừng sử dụng thay vì xóa vật lý."
         )
         note.setWordWrap(True)
         note.setStyleSheet(
@@ -133,6 +194,7 @@ class AdminDashboardScreen(QWidget):
         content_layout.addWidget(note)
         content_layout.addStretch()
         layout.addWidget(content, stretch=1)
+        self.refresh_statistics()
 
     def _build_sidebar(self) -> QWidget:
         sidebar = QWidget()
@@ -221,6 +283,68 @@ class AdminDashboardScreen(QWidget):
         card_layout.addStretch()
         card_layout.addWidget(button, alignment=Qt.AlignmentFlag.AlignLeft)
         return card, button
+
+    @staticmethod
+    def _statistics_card(title: str) -> tuple[QFrame, QLabel]:
+        card = QFrame()
+        card.setMinimumHeight(130)
+        card.setStyleSheet(
+            f"background:{COLOR_WHITE};border:1px solid {COLOR_LIGHT_GRAY};"
+            "border-radius:12px;"
+        )
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(18, 14, 18, 14)
+        title_label = QLabel(title)
+        title_label.setStyleSheet(
+            f"color:{COLOR_NAVY_DARK};font-size:15px;font-weight:700;"
+        )
+        value_label = QLabel("Đang tải...")
+        value_label.setWordWrap(True)
+        value_label.setStyleSheet(f"color:{COLOR_TEXT_MUTED};font-size:12px;")
+        layout.addWidget(title_label)
+        layout.addWidget(value_label, stretch=1)
+        return card, value_label
+
+    def refresh_statistics(self) -> None:
+        if self._controller is None:
+            self._show_statistics_error(
+                "Chưa có Admin Controller để tải thống kê."
+            )
+            return
+
+        result = self._controller.get_statistics()
+        if not result.success or result.statistics is None:
+            self._show_statistics_error(
+                result.message or "Không thể tải thống kê quản trị."
+            )
+            return
+
+        statistics = result.statistics
+        self._users_statistics_label.setText(
+            f"Tổng chưa xóa: {statistics.total_users} | Đang hoạt động: "
+            f"{statistics.active_users} | Đã khóa: {statistics.inactive_users} "
+            f"| Đã xóa: {statistics.deleted_users}"
+        )
+        self._profiles_statistics_label.setText(
+            f"Candidate: {statistics.candidate_profiles} | "
+            f"Company: {statistics.company_profiles} | "
+            f"Expert: {statistics.expert_profiles}"
+        )
+        self._skills_statistics_label.setText(
+            f"Tổng: {statistics.total_skills} | Đang dùng: "
+            f"{statistics.active_skills} | Ngừng dùng: "
+            f"{statistics.inactive_skills}"
+        )
+        self._statistics_status.setStyleSheet(
+            f"color:{COLOR_TEXT_MUTED};font-size:12px;"
+        )
+        self._statistics_status.setText("Thống kê đã được cập nhật.")
+
+    def _show_statistics_error(self, message: str) -> None:
+        self._statistics_status.setStyleSheet(
+            "color:#B42318;font-size:12px;font-weight:600;"
+        )
+        self._statistics_status.setText(message)
 
     def _open_users(self) -> None:
         if self._on_open_users_cb is not None:

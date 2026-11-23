@@ -22,6 +22,7 @@ from client.views.task_management_screen import TaskManagementScreen
 from client.views.user_management_screen import UserManagementScreen
 from client.views.welcome_screen import WelcomeScreen
 from app.models.user_model            import UserModel
+from server.controllers.admin_controller import AdminController
 from server.controllers.auth_controller import auth_controller
 from app.utils.constants import (
     APP_NAME,
@@ -46,6 +47,7 @@ class MainWindow(QMainWindow):
         self._tasks: TaskManagementScreen | None = None
         self._user_management: UserManagementScreen | None = None
         self._skill_management: SkillManagementScreen | None = None
+        self._admin_controller = AdminController()
         self._setup_window()
         self._setup_central_widget()
         self._route_initial()
@@ -143,7 +145,10 @@ class MainWindow(QMainWindow):
             self._dashboard = None
 
         if user.role == "admin":
-            dashboard = AdminDashboardScreen(user)
+            dashboard = AdminDashboardScreen(
+                user,
+                controller=self._admin_controller,
+            )
             dashboard.on_logout = self._on_logout
             dashboard.on_open_users = self._show_user_management
             dashboard.on_open_skills = self._show_skill_management
@@ -184,7 +189,9 @@ class MainWindow(QMainWindow):
         if self._user_management is not None:
             self._stack.removeWidget(self._user_management)
             self._user_management.deleteLater()
-        self._user_management = UserManagementScreen()
+        self._user_management = UserManagementScreen(
+            controller=self._admin_controller
+        )
         self._user_management.on_back = self._on_admin_management_back
         self._stack.addWidget(self._user_management)
         self._stack.setCurrentWidget(self._user_management)
@@ -195,7 +202,9 @@ class MainWindow(QMainWindow):
         if self._skill_management is not None:
             self._stack.removeWidget(self._skill_management)
             self._skill_management.deleteLater()
-        self._skill_management = SkillManagementScreen()
+        self._skill_management = SkillManagementScreen(
+            controller=self._admin_controller
+        )
         self._skill_management.on_back = self._on_admin_management_back
         self._stack.addWidget(self._skill_management)
         self._stack.setCurrentWidget(self._skill_management)
