@@ -463,8 +463,8 @@ class TestMig005ECreateAllTables:
             "SELECT COUNT(*) FROM sqlite_master WHERE type='table'"
             " AND name NOT LIKE 'sqlite_%'"
         ).fetchone()[0]
-        # 22 business tables, 3 recruitment tables, and one monitoring table.
-        assert tables == 26, f"Expected 26 tables, got {tables}"
+        # 22 business tables, 3 recruitment tables, and two monitoring tables.
+        assert tables == 27, f"Expected 27 tables, got {tables}"
 
     def test_contract_code_unique_constraint_still_works(self, fresh_db):
         """UNIQUE(contract_code) vẫn hoạt động sau migrate."""

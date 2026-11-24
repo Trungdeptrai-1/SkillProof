@@ -81,9 +81,21 @@ class ExamQuestionModel:
     difficulty: str
     points: float
     sort_order: int
+    supported_languages: tuple[str, ...] = ()
 
     @classmethod
     def from_row(cls, row: sqlite3.Row) -> ExamQuestionModel:
+        languages = ()
+        if "supported_languages" in row.keys() and row["supported_languages"]:
+            try:
+                parsed_languages = json.loads(row["supported_languages"])
+            except json.JSONDecodeError as exc:
+                raise ValueError("Invalid supported coding languages.") from exc
+            if not isinstance(parsed_languages, list) or any(
+                not isinstance(language, str) for language in parsed_languages
+            ):
+                raise ValueError("Supported coding languages must be a list of text.")
+            languages = tuple(parsed_languages)
         return cls(
             exam_paper_id=row["exam_paper_id"],
             question_id=row["question_id"],
@@ -94,6 +106,7 @@ class ExamQuestionModel:
             difficulty=row["difficulty"],
             points=float(row["points"]),
             sort_order=row["sort_order"],
+            supported_languages=languages,
         )
 
 
@@ -184,6 +197,7 @@ class ExamAnswerModel:
     answer_text: str | None
     answer_code: str | None
     selected_option_id: int | None
+    programming_language: str | None
 
     @classmethod
     def from_row(cls, row: sqlite3.Row) -> ExamAnswerModel:
@@ -194,6 +208,66 @@ class ExamAnswerModel:
             answer_text=row["answer_text"],
             answer_code=row["answer_code"],
             selected_option_id=row["selected_option_id"],
+            programming_language=row["programming_language"],
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class ExamAnswerGradingModel:
+    id: int
+    exam_session_id: int
+    question_id: int
+    candidate_id: int
+    company_id: int
+    exam_paper_id: int
+    answer_text: str | None
+    answer_code: str | None
+    selected_option_id: int | None
+    programming_language: str | None
+    score: float | None
+    max_score: float
+    feedback: str | None
+    graded_by: int | None
+    graded_at: str | None
+    is_graded: bool
+    grading_mode: str
+    test_results: list[dict[str, object]] | None
+
+    @classmethod
+    def from_row(cls, row: sqlite3.Row) -> ExamAnswerGradingModel:
+        raw_results = row["test_results_json"]
+        test_results = None
+        if raw_results is not None:
+            try:
+                parsed_results = json.loads(raw_results)
+            except json.JSONDecodeError as exc:
+                raise ValueError("Invalid stored coding test results.") from exc
+            if not isinstance(parsed_results, list) or any(
+                not isinstance(result, dict) for result in parsed_results
+            ):
+                raise ValueError("Coding test results must be a list of objects.")
+            test_results = parsed_results
+        return cls(
+            id=row["id"],
+            exam_session_id=row["exam_session_id"],
+            question_id=row["question_id"],
+            candidate_id=row["candidate_id"],
+            company_id=row["company_id"],
+            exam_paper_id=row["exam_paper_id"],
+            answer_text=row["answer_text"],
+            answer_code=row["answer_code"],
+            selected_option_id=row["selected_option_id"],
+            programming_language=row["programming_language"],
+            score=(
+                float(row["score"]) if row["score"] is not None else None
+            ),
+            max_score=float(row["max_score"]),
+            feedback=row["feedback"],
+            graded_by=row["graded_by"],
+            graded_at=row["graded_at"],
+            is_graded=bool(row["is_graded"]),
+            grading_mode=row["grading_mode"],
+            test_results=test_results,
         )
 
 
@@ -290,10 +364,17 @@ class ExamSessionEventModel:
     id: int
     exam_session_id: int
     candidate_id: int
+    proctoring_session_id: int | None
     event_type: str
     is_violation: bool
     details: dict[str, object] | None
     occurred_at: str
+    processing_status: str
+    processed_by: int | None
+    processed_at: str | None
+    processing_notes: str | None
+    evidence_uri: str | None
+    consent_for_evidence: bool
 
     @classmethod
     def from_row(cls, row: sqlite3.Row) -> ExamSessionEventModel:
@@ -310,10 +391,46 @@ class ExamSessionEventModel:
             id=row["id"],
             exam_session_id=row["exam_session_id"],
             candidate_id=row["candidate_id"],
+            proctoring_session_id=row["proctoring_session_id"],
             event_type=row["event_type"],
             is_violation=bool(row["is_violation"]),
             details=details,
             occurred_at=row["occurred_at"],
+            processing_status=row["processing_status"],
+            processed_by=row["processed_by"],
+            processed_at=row["processed_at"],
+            processing_notes=row["processing_notes"],
+            evidence_uri=row["evidence_uri"],
+            consent_for_evidence=bool(row["consent_for_evidence"]),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class ExamProctoringSessionModel:
+    id: int
+    exam_session_id: int
+    candidate_id: int
+    consent_for_evidence: bool
+    status: str
+    started_at: str
+    ended_at: str | None
+    reviewed_by: int | None
+    reviewed_at: str | None
+    review_notes: str | None
+
+    @classmethod
+    def from_row(cls, row: sqlite3.Row) -> ExamProctoringSessionModel:
+        return cls(
+            id=row["id"],
+            exam_session_id=row["exam_session_id"],
+            candidate_id=row["candidate_id"],
+            consent_for_evidence=bool(row["consent_for_evidence"]),
+            status=row["status"],
+            started_at=row["started_at"],
+            ended_at=row["ended_at"],
+            reviewed_by=row["reviewed_by"],
+            reviewed_at=row["reviewed_at"],
+            review_notes=row["review_notes"],
         )
 
 
@@ -343,6 +460,25 @@ class InterviewModel:
             duration_min=row["duration_min"],
             meeting_url=row["meeting_url"],
             created_at=row["created_at"],
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class InterviewParticipantModel:
+    id: int
+    interview_id: int
+    expert_id: int
+    role: str
+    joined_at: str | None
+
+    @classmethod
+    def from_row(cls, row: sqlite3.Row) -> InterviewParticipantModel:
+        return cls(
+            id=row["id"],
+            interview_id=row["interview_id"],
+            expert_id=row["expert_id"],
+            role=row["role"],
+            joined_at=row["joined_at"],
         )
 
 

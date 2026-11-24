@@ -41,10 +41,12 @@ những bản triển khai nghiệp vụ song song.
   Service kiểm tra hạn khi chấp nhận. Thời lượng bài thi được kiểm tra từ
   `duration_min`: Service chặn xem/sửa đáp án sau khi hết giờ, nhưng vẫn chấm
   các câu đã lưu khi ứng viên nộp bài.
-- MIG-007 bổ sung nhật ký sự kiện phiên thi bất biến; test cases Coding Test
-  dùng lại `question_bank.test_cases`, còn câu tự luận/mã nguồn được lưu tại
-  `exam_answers.answer_text`/`answer_code`. Repository hỗ trợ lập lịch và lưu
-  đánh giá phỏng vấn, cấp/xác minh/thu hồi chứng chỉ trên SQLite hiện có.
+- MIG-007 bổ sung nhật ký sự kiện phiên thi và dữ liệu thu hồi chứng chỉ;
+  MIG-008 bổ sung phiên giám sát, consent/evidence reference, trạng thái xử lý,
+  ngôn ngữ Coding Test và kết quả chấm. Test cases dùng lại
+  `question_bank.test_cases`; câu tự luận/mã nguồn và điểm/nhận xét dùng lại
+  `exam_answers`. Hợp đồng tích hợp nằm trong
+  [`docs/FINAL_FEATURE_CONTRACT.md`](../docs/FINAL_FEATURE_CONTRACT.md).
 - Chạy kiểm thử bằng `python -m pytest -q`; kiểm tra cú pháp bằng
   `python -m compileall -q app client server tests`.
 

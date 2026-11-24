@@ -145,6 +145,7 @@ def _apply_migrations(conn: sqlite3.Connection) -> None:
     _mig_005_extend_contracts_and_softdelete(conn)
     _mig_006_create_recruitment_workflow(conn)
     _mig_007_complete_assessment_data(conn)
+    _mig_008_complete_feature_persistence(conn)
 
 
 # ── MIG-001 ───────────────────────────────────────────────────────────────────
@@ -1288,6 +1289,237 @@ def _mig_007_complete_assessment_data(conn: sqlite3.Connection) -> None:
     logger.info("MIG-007: exam event and certificate revocation data are ready.")
 
 
+def _mig_008_complete_feature_persistence(conn: sqlite3.Connection) -> None:
+    """MIG-008: Add coding, grading, proctoring, and review persistence fields."""
+    required_tables = {
+        "question_bank",
+        "exam_answers",
+        "exam_sessions",
+        "exam_session_events",
+        "users",
+    }
+    existing_tables = {
+        row[0]
+        for row in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        ).fetchall()
+    }
+    missing_tables = required_tables - existing_tables
+    if missing_tables:
+        raise RuntimeError(
+            f"MIG-008 requires existing tables: {sorted(missing_tables)}"
+        )
+
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS exam_proctoring_sessions (
+            id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+            exam_session_id       INTEGER NOT NULL UNIQUE
+                                  REFERENCES exam_sessions(id) ON DELETE CASCADE,
+            candidate_id          INTEGER NOT NULL
+                                  REFERENCES users(id) ON DELETE CASCADE,
+            consent_for_evidence  INTEGER NOT NULL DEFAULT 0
+                                  CHECK(consent_for_evidence IN (0, 1)),
+            status                TEXT NOT NULL DEFAULT 'active'
+                                  CHECK(status IN (
+                                      'active','completed','flagged','reviewed'
+                                  )),
+            started_at            TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+            ended_at              TEXT,
+            reviewed_by           INTEGER REFERENCES users(id) ON DELETE SET NULL,
+            reviewed_at           TEXT,
+            review_notes          TEXT,
+            CHECK(
+                (status = 'active' AND ended_at IS NULL)
+                OR (status <> 'active' AND ended_at IS NOT NULL)
+            ),
+            CHECK(
+                (status = 'reviewed' AND reviewed_at IS NOT NULL)
+                OR (status <> 'reviewed')
+            )
+        );
+        CREATE INDEX IF NOT EXISTS idx_exam_proctoring_candidate_status
+            ON exam_proctoring_sessions(candidate_id, status);
+        """
+    )
+
+    question_columns = {
+        row["name"] for row in conn.execute("PRAGMA table_info(question_bank)")
+    }
+    if "supported_languages" not in question_columns:
+        conn.execute(
+            "ALTER TABLE question_bank ADD COLUMN supported_languages TEXT"
+        )
+    conn.execute(
+        """
+        UPDATE question_bank
+        SET supported_languages = '["python"]'
+        WHERE question_type = 'coding' AND supported_languages IS NULL
+        """
+    )
+
+    answer_columns = {
+        row["name"] for row in conn.execute("PRAGMA table_info(exam_answers)")
+    }
+    if "programming_language" not in answer_columns:
+        conn.execute("ALTER TABLE exam_answers ADD COLUMN programming_language TEXT")
+    if "test_results_json" not in answer_columns:
+        conn.execute("ALTER TABLE exam_answers ADD COLUMN test_results_json TEXT")
+    if "grading_mode" not in answer_columns:
+        conn.execute(
+            "ALTER TABLE exam_answers ADD COLUMN grading_mode TEXT NOT NULL "
+            "DEFAULT 'manual' CHECK(grading_mode IN ('manual','automatic'))"
+        )
+    conn.execute(
+        """
+        UPDATE exam_answers
+        SET grading_mode = 'automatic'
+        WHERE is_graded = 1 AND question_id IN (
+            SELECT id FROM question_bank WHERE question_type = 'multiple_choice'
+        )
+        """
+    )
+    conn.execute(
+        """
+        UPDATE exam_answers
+        SET programming_language = 'python'
+        WHERE answer_code IS NOT NULL AND programming_language IS NULL
+          AND question_id IN (
+              SELECT id FROM question_bank WHERE question_type = 'coding'
+          )
+        """
+    )
+
+    event_columns = {
+        row["name"]
+        for row in conn.execute("PRAGMA table_info(exam_session_events)")
+    }
+    event_additions = {
+        "proctoring_session_id": (
+            "INTEGER REFERENCES exam_proctoring_sessions(id) ON DELETE SET NULL"
+        ),
+        "processing_status": (
+            "TEXT NOT NULL DEFAULT 'pending' "
+            "CHECK(processing_status IN ('pending','reviewed','dismissed','escalated'))"
+        ),
+        "processed_by": "INTEGER REFERENCES users(id) ON DELETE SET NULL",
+        "processed_at": "TEXT",
+        "processing_notes": "TEXT",
+        "evidence_uri": (
+            "TEXT CHECK(evidence_uri IS NULL OR "
+            "lower(substr(evidence_uri, 1, 5)) <> 'data:')"
+        ),
+        "consent_for_evidence": (
+            "INTEGER NOT NULL DEFAULT 0 CHECK(consent_for_evidence IN (0, 1))"
+        ),
+    }
+    for column, definition in event_additions.items():
+        if column not in event_columns:
+            conn.execute(
+                f"ALTER TABLE exam_session_events ADD COLUMN {column} {definition}"
+            )
+
+    conn.executescript(
+        """
+        DROP TRIGGER IF EXISTS trg_exam_session_events_immutable;
+        DROP TRIGGER IF EXISTS trg_exam_session_events_source_immutable;
+        CREATE TRIGGER trg_exam_session_events_source_immutable
+        BEFORE UPDATE ON exam_session_events
+        WHEN NEW.id IS NOT OLD.id
+          OR NEW.exam_session_id IS NOT OLD.exam_session_id
+          OR NEW.candidate_id IS NOT OLD.candidate_id
+          OR NEW.event_type IS NOT OLD.event_type
+          OR NEW.is_violation IS NOT OLD.is_violation
+          OR NEW.details_json IS NOT OLD.details_json
+          OR NEW.occurred_at IS NOT OLD.occurred_at
+          OR NEW.proctoring_session_id IS NOT OLD.proctoring_session_id
+          OR NEW.evidence_uri IS NOT OLD.evidence_uri
+          OR NEW.consent_for_evidence IS NOT OLD.consent_for_evidence
+        BEGIN
+            SELECT RAISE(ABORT, 'exam event evidence is immutable');
+        END;
+
+        CREATE TRIGGER IF NOT EXISTS trg_exam_session_event_evidence_consent
+        BEFORE INSERT ON exam_session_events
+        WHEN NEW.evidence_uri IS NOT NULL
+         AND (
+            NEW.consent_for_evidence <> 1
+            OR NOT EXISTS (
+                SELECT 1 FROM exam_proctoring_sessions AS ps
+                WHERE ps.id = NEW.proctoring_session_id
+                  AND ps.exam_session_id = NEW.exam_session_id
+                  AND ps.candidate_id = NEW.candidate_id
+                  AND ps.consent_for_evidence = 1
+                  AND ps.status = 'active'
+            )
+         )
+        BEGIN
+            SELECT RAISE(ABORT, 'evidence requires explicit active-session consent');
+        END;
+
+        CREATE TRIGGER IF NOT EXISTS trg_exam_session_event_processing_once
+        BEFORE UPDATE OF processing_status ON exam_session_events
+        WHEN OLD.processing_status <> 'pending'
+         AND NEW.processing_status <> OLD.processing_status
+        BEGIN
+            SELECT RAISE(ABORT, 'processed exam events cannot be reopened');
+        END;
+
+        CREATE TRIGGER IF NOT EXISTS trg_exam_proctoring_session_candidate
+        BEFORE INSERT ON exam_proctoring_sessions
+        WHEN NOT EXISTS (
+            SELECT 1 FROM exam_sessions
+            WHERE id = NEW.exam_session_id
+              AND candidate_id = NEW.candidate_id
+              AND status = 'in_progress'
+        )
+        BEGIN
+            SELECT RAISE(ABORT, 'proctoring requires the candidate active exam');
+        END;
+
+        CREATE TRIGGER IF NOT EXISTS trg_exam_proctoring_event_session
+        BEFORE INSERT ON exam_session_events
+        WHEN NEW.proctoring_session_id IS NOT NULL
+         AND NOT EXISTS (
+            SELECT 1 FROM exam_proctoring_sessions AS ps
+            WHERE ps.id = NEW.proctoring_session_id
+              AND ps.exam_session_id = NEW.exam_session_id
+              AND ps.candidate_id = NEW.candidate_id
+              AND ps.status = 'active'
+        )
+        BEGIN
+            SELECT RAISE(ABORT, 'event requires its active proctoring session');
+        END;
+
+        DROP TRIGGER IF EXISTS trg_recruitment_exam_answers_update_in_progress;
+        CREATE TRIGGER trg_recruitment_exam_answers_update_in_progress
+        BEFORE UPDATE OF
+            answer_text, answer_code, selected_option_id, programming_language
+        ON exam_answers
+        WHEN EXISTS (
+            SELECT 1
+            FROM recruitment_invitations AS ri
+            JOIN exam_sessions AS es ON es.id = ri.exam_session_id
+            WHERE ri.exam_session_id = NEW.exam_session_id
+              AND es.status <> 'in_progress'
+        )
+        BEGIN
+            SELECT RAISE(ABORT, 'recruitment answers can only be changed in progress');
+        END;
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_exam_session_events_processing "
+        "ON exam_session_events(processing_status, is_violation)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_exam_session_events_proctoring "
+        "ON exam_session_events(proctoring_session_id, processing_status)"
+    )
+    conn.commit()
+    logger.info("MIG-008: coding, grading, proctoring, and review data are ready.")
+
+
 # ── Tiện ích ──────────────────────────────────────────────────────────────────
 
 def drop_all_tables() -> None:
@@ -1298,6 +1530,7 @@ def drop_all_tables() -> None:
         "recruitment_invitations",
         "job_postings",
         "exam_session_events",
+        "exam_proctoring_sessions",
     ]
     # Business tables (MIG-004/005) — drop theo thứ tự ngược FK
     business_tables = [
