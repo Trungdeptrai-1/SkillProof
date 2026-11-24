@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 
 from server.services.certificate_service import CertificateService
 from server.services.exam_monitoring_service import ExamMonitoringService
@@ -200,6 +200,16 @@ class InterviewController:
             return _invalid_input()
         return self._service.get(interview_id)
 
+    def get_meeting_link(self, interview_id: int) -> WorkflowResult:
+        if isinstance(interview_id, bool) or not isinstance(interview_id, int):
+            return _invalid_input()
+        return self._service.get_meeting_link(interview_id)
+
+    def list_participants(self, interview_id: int) -> WorkflowResult:
+        if isinstance(interview_id, bool) or not isinstance(interview_id, int):
+            return _invalid_input()
+        return self._service.list_participants(interview_id)
+
     def update_status(self, interview_id: int, status: str) -> WorkflowResult:
         if (
             isinstance(interview_id, bool)
@@ -285,16 +295,139 @@ class ExamMonitoringController:
     def __init__(self, service: ExamMonitoringService) -> None:
         self._service = service
 
-    def record_event(self, session_id: int, event_type: str) -> WorkflowResult:
+    def get_active_session(self) -> WorkflowResult:
+        return self._service.get_active_exam_session()
+
+    def start_session(
+        self, session_id: int, *, consent_for_evidence: bool = False
+    ) -> WorkflowResult:
+        if (
+            isinstance(session_id, bool)
+            or not isinstance(session_id, int)
+            or not isinstance(consent_for_evidence, bool)
+        ):
+            return _invalid_input()
+        return self._service.start_session(
+            session_id, consent_for_evidence=consent_for_evidence
+        )
+
+    def get_session(self, session_id: int) -> WorkflowResult:
+        if isinstance(session_id, bool) or not isinstance(session_id, int):
+            return _invalid_input()
+        return self._service.get_session(session_id)
+
+    def finish_session(self, session_id: int) -> WorkflowResult:
+        if isinstance(session_id, bool) or not isinstance(session_id, int):
+            return _invalid_input()
+        return self._service.finish_session(session_id)
+
+    def record_event(
+        self,
+        session_id: int,
+        event_type: str,
+        *,
+        details: Mapping[str, object] | None = None,
+        evidence_uri: str | None = None,
+    ) -> WorkflowResult:
         if (
             isinstance(session_id, bool)
             or not isinstance(session_id, int)
             or not isinstance(event_type, str)
+            or (details is not None and not isinstance(details, Mapping))
+            or (evidence_uri is not None and not isinstance(evidence_uri, str))
         ):
             return _invalid_input()
-        return self._service.record_event(session_id, event_type)
+        return self._service.record_event(
+            session_id,
+            event_type,
+            details=details,
+            evidence_uri=evidence_uri,
+        )
 
-    def list_events(self, session_id: int) -> WorkflowResult:
+    def record_camera_status(
+        self,
+        session_id: int,
+        status: str,
+        *,
+        evidence_uri: str | None = None,
+    ) -> WorkflowResult:
+        event_types = {
+            "active": "camera_active",
+            "disconnected": "camera_disconnected",
+            "ended": "camera_ended",
+        }
+        if (
+            isinstance(session_id, bool)
+            or not isinstance(session_id, int)
+            or not isinstance(status, str)
+            or (evidence_uri is not None and not isinstance(evidence_uri, str))
+        ):
+            return _invalid_input()
+        event_type = event_types.get(status)
+        if event_type is None:
+            return _invalid_input()
+        return self._service.record_event(
+            session_id, event_type, evidence_uri=evidence_uri
+        )
+
+    def list_events(
+        self, session_id: int, *, violations_only: bool = False
+    ) -> WorkflowResult:
+        if (
+            isinstance(session_id, bool)
+            or not isinstance(session_id, int)
+            or not isinstance(violations_only, bool)
+        ):
+            return _invalid_input()
+        return self._service.list_events(
+            session_id, violations_only=violations_only
+        )
+
+    def get_company_session(self, session_id: int) -> WorkflowResult:
         if isinstance(session_id, bool) or not isinstance(session_id, int):
             return _invalid_input()
-        return self._service.list_events(session_id)
+        return self._service.get_company_session(session_id)
+
+    def list_company_events(
+        self,
+        session_id: int,
+        *,
+        violations_only: bool = False,
+        processing_status: str | None = None,
+    ) -> WorkflowResult:
+        if (
+            isinstance(session_id, bool)
+            or not isinstance(session_id, int)
+            or not isinstance(violations_only, bool)
+            or (
+                processing_status is not None
+                and not isinstance(processing_status, str)
+            )
+        ):
+            return _invalid_input()
+        return self._service.list_company_events(
+            session_id,
+            violations_only=violations_only,
+            processing_status=processing_status,
+        )
+
+    def review_event(
+        self,
+        session_id: int,
+        event_id: int,
+        processing_status: str,
+        *,
+        notes: str | None = None,
+    ) -> WorkflowResult:
+        if (
+            isinstance(session_id, bool)
+            or not isinstance(session_id, int)
+            or isinstance(event_id, bool)
+            or not isinstance(event_id, int)
+            or not isinstance(processing_status, str)
+            or (notes is not None and not isinstance(notes, str))
+        ):
+            return _invalid_input()
+        return self._service.review_event(
+            session_id, event_id, processing_status, notes=notes
+        )
