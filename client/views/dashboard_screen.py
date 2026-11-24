@@ -67,6 +67,9 @@ ROLE_CONFIG: dict[str, dict] = {
             ("📜", "Chứng chỉ",             "Chứng nhận kỹ năng đã đạt được"),
             ("🔎", "Khám phá cơ hội",       "Tìm kiếm vị trí phù hợp năng lực"),
             ("📝", "Lời mời làm bài",       "Nhận lời mời, làm bài thi và xem kết quả"),
+            ("✍", "Bài tự luận & Coding",  "Bài trả lời dài và lập trình"),
+            ("⏱", "Giám sát phiên thi",    "Trạng thái phiên và cảnh báo focus cục bộ"),
+            ("🗓", "Phỏng vấn",             "Lịch và trạng thái phỏng vấn"),
         ],
         "accent": "#2E7D32",
     },
@@ -79,6 +82,9 @@ ROLE_CONFIG: dict[str, dict] = {
             ("🎯", "Nhiệm vụ của tôi",       "Tạo và theo dõi nhiệm vụ"),
             ("🏢", "Hồ sơ doanh nghiệp",     "Cập nhật thông tin doanh nghiệp"),
             ("🧑‍💼", "Tuyển dụng & đánh giá", "Vị trí, bài thi, lời mời và kết quả"),
+            ("📝", "Chấm bài tự luận/Coding", "Chấm thủ công khi backend hỗ trợ"),
+            ("🗓", "Lịch phỏng vấn",          "Lịch và ghi chú đánh giá"),
+            ("📜", "Chứng chỉ",               "Cấp hoặc xác minh theo quyền Controller"),
         ],
         "accent": "#4527A0",
     },
@@ -90,9 +96,21 @@ ROLE_CONFIG: dict[str, dict] = {
             ("📋", "Hợp đồng của tôi",       "Xem và xử lý lời mời hợp tác"),
             ("🎯", "Nhiệm vụ của tôi",       "Theo dõi nhiệm vụ được giao"),
             ("📈", "Thống kê chuyên môn",    "Chưa có báo cáo kết nối Controller"),
+            ("📝", "Chấm bài tự luận/Coding", "Chấm thủ công khi backend hỗ trợ"),
+            ("🗓", "Lịch phỏng vấn",          "Lịch và ghi chú đánh giá"),
+            ("📜", "Chứng chỉ",               "Cấp hoặc xác minh theo quyền Controller"),
         ],
         "accent": "#E65100",
     },
+}
+
+EXTENDED_WORKFLOW_ROUTES = {
+    "Bài tự luận & Coding": "candidate_specialized",
+    "Giám sát phiên thi": "exam_monitor",
+    "Chấm bài tự luận/Coding": "manual_grading",
+    "Phỏng vấn": "interviews",
+    "Lịch phỏng vấn": "interviews",
+    "Chứng chỉ": "certificates",
 }
 
 
@@ -116,6 +134,7 @@ class _Sidebar(QWidget):
         self._on_open_tasks_cb = None
         self._on_open_company_recruitment_cb = None
         self._on_open_candidate_assessments_cb = None
+        self._on_open_extended_workflow_cb = None
         self._setup_ui()
 
     def paintEvent(self, event):  # noqa: N802
@@ -211,6 +230,11 @@ class _Sidebar(QWidget):
                 btn.clicked.connect(self._handle_open_tasks)
             elif self._user.role == "expert" and label == "Hồ sơ chuyên gia":
                 btn.clicked.connect(self._handle_open_expert_profile)
+            elif label in EXTENDED_WORKFLOW_ROUTES:
+                btn.clicked.connect(
+                    lambda checked=False, route=EXTENDED_WORKFLOW_ROUTES[label]:
+                    self._handle_open_extended_workflow(route)
+                )
             layout.addWidget(btn)
             layout.addSpacing(4)
 
@@ -375,6 +399,18 @@ class _Sidebar(QWidget):
         if callable(self._on_open_candidate_assessments_cb):
             self._on_open_candidate_assessments_cb()
 
+    @property
+    def on_open_extended_workflow(self):
+        return self._on_open_extended_workflow_cb
+
+    @on_open_extended_workflow.setter
+    def on_open_extended_workflow(self, callback):
+        self._on_open_extended_workflow_cb = callback
+
+    def _handle_open_extended_workflow(self, route: str) -> None:
+        if callable(self._on_open_extended_workflow_cb):
+            self._on_open_extended_workflow_cb(route)
+
 
 # ══════════════════════════════════════════════════════════════════════════════
 # Content area
@@ -453,17 +489,31 @@ class _ContentArea(QWidget):
         grid.setContentsMargins(0, 0, 0, 0)
 
         active_features = {
-            "candidate": {"Hồ sơ cá nhân"},
+            "candidate": {
+                "Hồ sơ cá nhân",
+                "Lời mời làm bài",
+                "Bài tự luận & Coding",
+                "Giám sát phiên thi",
+                "Phỏng vấn",
+                "Chứng chỉ",
+            },
             "company": {
                 "Tìm chuyên gia",
                 "Hợp đồng của tôi",
                 "Nhiệm vụ của tôi",
                 "Hồ sơ doanh nghiệp",
+                "Tuyển dụng & đánh giá",
+                "Chấm bài tự luận/Coding",
+                "Lịch phỏng vấn",
+                "Chứng chỉ",
             },
             "expert": {
                 "Hồ sơ chuyên gia",
                 "Hợp đồng của tôi",
                 "Nhiệm vụ của tôi",
+                "Chấm bài tự luận/Coding",
+                "Lịch phỏng vấn",
+                "Chứng chỉ",
             },
         }
         for i, (icon, label, desc) in enumerate(cfg["features"]):
@@ -584,6 +634,7 @@ class DashboardScreen(QWidget):
         self._on_open_tasks_cb = None
         self._on_open_company_recruitment_cb = None
         self._on_open_candidate_assessments_cb = None
+        self._on_open_extended_workflow_cb = None
         self._setup_ui()
         QTimer.singleShot(80, self._animate_in)
 
@@ -675,6 +726,16 @@ class DashboardScreen(QWidget):
         if self._sidebar:
             self._sidebar.on_open_candidate_assessments = cb
 
+    @property
+    def on_open_extended_workflow(self):
+        return self._on_open_extended_workflow_cb
+
+    @on_open_extended_workflow.setter
+    def on_open_extended_workflow(self, callback):
+        self._on_open_extended_workflow_cb = callback
+        if self._sidebar:
+            self._sidebar.on_open_extended_workflow = self._handle_open_extended_workflow
+
     def _setup_ui(self) -> None:
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -690,6 +751,7 @@ class DashboardScreen(QWidget):
         self._sidebar.on_open_tasks = self._handle_open_tasks
         self._sidebar.on_open_company_recruitment = self._handle_open_company_recruitment
         self._sidebar.on_open_candidate_assessments = self._handle_open_candidate_assessments
+        self._sidebar.on_open_extended_workflow = self._handle_open_extended_workflow
 
         self._content = _ContentArea(self._user)
 
@@ -743,3 +805,7 @@ class DashboardScreen(QWidget):
     def _handle_open_candidate_assessments(self) -> None:
         if callable(self._on_open_candidate_assessments_cb):
             self._on_open_candidate_assessments_cb()
+
+    def _handle_open_extended_workflow(self, route: str) -> None:
+        if callable(self._on_open_extended_workflow_cb):
+            self._on_open_extended_workflow_cb(route)

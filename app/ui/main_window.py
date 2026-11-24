@@ -13,10 +13,17 @@ from client.views.candidate_profile_screen import CandidateProfileScreen
 from client.views.company_profile_screen import CompanyProfileScreen
 from client.views.company_recruitment_screen import CompanyRecruitmentScreen
 from client.views.contract_management_screen import ContractManagementScreen
+from client.views.candidate_special_assessment_screen import (
+    CandidateSpecialAssessmentScreen,
+)
+from client.views.certificate_screen import CertificateScreen
 from client.views.dashboard_screen import DashboardScreen
+from client.views.exam_monitor_screen import ExamMonitorScreen
 from client.views.expert_profile_screen import ExpertProfileScreen
 from client.views.expert_search_screen import ExpertSearchScreen
 from client.views.first_run_screen import FirstRunScreen
+from client.views.grading_screen import GradingScreen
+from client.views.interview_screen import InterviewScreen
 from client.views.login_screen import LoginScreen
 from client.views.register_screen import RegisterScreen
 from client.views.skill_management_screen import SkillManagementScreen
@@ -26,6 +33,13 @@ from client.views.welcome_screen import WelcomeScreen
 from client.views.recruitment_contracts import (
     CandidateAssessmentController,
     CompanyRecruitmentController,
+)
+from client.views.extended_workflow_contracts import (
+    CandidateSpecializedAssessmentController,
+    CertificateController,
+    ExamMonitorController,
+    InterviewController,
+    ManualGradingController,
 )
 from app.models.user_model            import UserModel
 from server.controllers.admin_controller import AdminController
@@ -45,6 +59,13 @@ class MainWindow(QMainWindow):
         *,
         company_recruitment_controller: CompanyRecruitmentController | None = None,
         candidate_assessment_controller: CandidateAssessmentController | None = None,
+        candidate_specialized_assessment_controller: (
+            CandidateSpecializedAssessmentController | None
+        ) = None,
+        manual_grading_controller: ManualGradingController | None = None,
+        exam_monitor_controller: ExamMonitorController | None = None,
+        interview_controller: InterviewController | None = None,
+        certificate_controller: CertificateController | None = None,
     ) -> None:
         super().__init__()
         self._dashboard: DashboardScreen | AdminDashboardScreen | None = None
@@ -60,6 +81,18 @@ class MainWindow(QMainWindow):
         self._skill_management: SkillManagementScreen | None = None
         self._company_recruitment: CompanyRecruitmentScreen | None = None
         self._candidate_assessments: CandidateAssessmentScreen | None = None
+        self._candidate_special_assessments: CandidateSpecialAssessmentScreen | None = None
+        self._grading_screen: GradingScreen | None = None
+        self._exam_monitor: ExamMonitorScreen | None = None
+        self._interview_screen: InterviewScreen | None = None
+        self._certificate_screen: CertificateScreen | None = None
+        self._candidate_specialized_assessment_controller = (
+            candidate_specialized_assessment_controller
+        )
+        self._manual_grading_controller = manual_grading_controller
+        self._exam_monitor_controller = exam_monitor_controller
+        self._interview_controller = interview_controller
+        self._certificate_controller = certificate_controller
         self._admin_controller = AdminController()
         if (
             company_recruitment_controller is None
@@ -177,6 +210,7 @@ class MainWindow(QMainWindow):
     def _show_dashboard(self, user: UserModel) -> None:
         self._discard_admin_screens()
         self._discard_recruitment_screens()
+        self._discard_extended_screens()
         if self._dashboard is not None:
             self._stack.removeWidget(self._dashboard)
             self._dashboard.deleteLater()
@@ -190,6 +224,7 @@ class MainWindow(QMainWindow):
             dashboard.on_logout = self._on_logout
             dashboard.on_open_users = self._show_user_management
             dashboard.on_open_skills = self._show_skill_management
+            dashboard.on_open_certificates = self._show_certificates
         else:
             dashboard = DashboardScreen(user)
             dashboard.on_logout = self._on_logout
@@ -201,6 +236,7 @@ class MainWindow(QMainWindow):
             dashboard.on_open_tasks = self._show_tasks
             dashboard.on_open_company_recruitment = self._show_company_recruitment
             dashboard.on_open_candidate_assessments = self._show_candidate_assessments
+            dashboard.on_open_extended_workflow = self._show_extended_workflow
         self._dashboard = dashboard
         self._stack.addWidget(self._dashboard)
         self._stack.setCurrentWidget(self._dashboard)
@@ -215,6 +251,20 @@ class MainWindow(QMainWindow):
 
     def _discard_recruitment_screens(self) -> None:
         for attribute in ("_company_recruitment", "_candidate_assessments"):
+            screen = getattr(self, attribute)
+            if screen is not None:
+                self._stack.removeWidget(screen)
+                screen.deleteLater()
+                setattr(self, attribute, None)
+
+    def _discard_extended_screens(self) -> None:
+        for attribute in (
+            "_candidate_special_assessments",
+            "_grading_screen",
+            "_exam_monitor",
+            "_interview_screen",
+            "_certificate_screen",
+        ):
             screen = getattr(self, attribute)
             if screen is not None:
                 self._stack.removeWidget(screen)
@@ -299,6 +349,105 @@ class MainWindow(QMainWindow):
         self._stack.setCurrentWidget(self._candidate_assessments)
 
     def _on_recruitment_back(self) -> None:
+        if self._dashboard is not None:
+            self._stack.setCurrentWidget(self._dashboard)
+
+    def _show_extended_workflow(self, route: str) -> None:
+        routes = {
+            "candidate_specialized": self._show_candidate_special_assessments,
+            "exam_monitor": self._show_exam_monitor,
+            "manual_grading": self._show_grading,
+            "interviews": self._show_interviews,
+            "certificates": self._show_certificates,
+        }
+        callback = routes.get(route)
+        if callback is not None:
+            callback()
+
+    def _show_candidate_special_assessments(self) -> None:
+        if not self._has_session_role("candidate"):
+            return
+        if self._candidate_special_assessments is None:
+            self._candidate_special_assessments = CandidateSpecialAssessmentScreen(
+                controller=self._candidate_specialized_assessment_controller
+            )
+            self._candidate_special_assessments.on_back = self._on_extended_workflow_back
+            self._stack.addWidget(self._candidate_special_assessments)
+        else:
+            self._candidate_special_assessments.refresh()
+        self._stack.setCurrentWidget(self._candidate_special_assessments)
+
+    def _show_exam_monitor(self) -> None:
+        if not self._has_session_role("candidate"):
+            return
+        if self._exam_monitor is None:
+            self._exam_monitor = ExamMonitorScreen(
+                controller=self._exam_monitor_controller
+            )
+            self._exam_monitor.on_back = self._on_extended_workflow_back
+            self._stack.addWidget(self._exam_monitor)
+        else:
+            self._exam_monitor.refresh()
+        self._stack.setCurrentWidget(self._exam_monitor)
+
+    def _show_grading(self) -> None:
+        if not (
+            self._has_session_role("company")
+            or self._has_session_role("expert")
+        ):
+            return
+        if self._grading_screen is None:
+            self._grading_screen = GradingScreen(
+                controller=self._manual_grading_controller
+            )
+            self._grading_screen.on_back = self._on_extended_workflow_back
+            self._stack.addWidget(self._grading_screen)
+        else:
+            self._grading_screen.refresh()
+        self._stack.setCurrentWidget(self._grading_screen)
+
+    def _show_interviews(self) -> None:
+        from app.services.auth_service import SessionManager
+
+        session = SessionManager.instance()
+        if (
+            not session.is_logged_in
+            or session.current_user is None
+            or session.current_user.role not in {"candidate", "company", "expert"}
+        ):
+            return
+        if self._interview_screen is None:
+            self._interview_screen = InterviewScreen(
+                role=session.current_user.role,
+                controller=self._interview_controller,
+            )
+            self._interview_screen.on_back = self._on_extended_workflow_back
+            self._stack.addWidget(self._interview_screen)
+        else:
+            self._interview_screen.refresh()
+        self._stack.setCurrentWidget(self._interview_screen)
+
+    def _show_certificates(self) -> None:
+        from app.services.auth_service import SessionManager
+
+        session = SessionManager.instance()
+        if not session.is_logged_in or session.current_user is None:
+            return
+        role = session.current_user.role
+        if role not in {"candidate", "company", "expert", "admin"}:
+            return
+        if self._certificate_screen is None:
+            self._certificate_screen = CertificateScreen(
+                role=role,
+                controller=self._certificate_controller,
+            )
+            self._certificate_screen.on_back = self._on_extended_workflow_back
+            self._stack.addWidget(self._certificate_screen)
+        else:
+            self._certificate_screen.refresh()
+        self._stack.setCurrentWidget(self._certificate_screen)
+
+    def _on_extended_workflow_back(self) -> None:
         if self._dashboard is not None:
             self._stack.setCurrentWidget(self._dashboard)
 
@@ -474,6 +623,7 @@ class MainWindow(QMainWindow):
     def _on_logout(self) -> None:
         self._discard_admin_screens()
         self._discard_recruitment_screens()
+        self._discard_extended_screens()
         self._show_login()
 
     def _on_learn_more(self) -> None:
