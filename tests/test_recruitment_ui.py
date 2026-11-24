@@ -5,6 +5,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 import pytest
 from PySide6.QtWidgets import QApplication, QMessageBox, QPushButton
 
+from app.utils.helpers import hash_password
 from client.views.candidate_assessment_screen import CandidateAssessmentScreen
 from client.views.company_recruitment_screen import CompanyRecruitmentScreen
 from client.views.recruitment_contracts import (
@@ -508,4 +509,158 @@ def test_main_window_uses_real_recruitment_adapters_by_default(
     assert window._company_recruitment is not None
     assert window._company_recruitment._position_save.isEnabled()
     assert window._company_recruitment._positions_table.rowCount() == 0
+    window.close()
+
+
+def _create_user(database, username, role):
+    email = f"{username}@recruitment.example.test"
+    password = "RecruitmentPass1"
+    database.execute(
+        """
+        INSERT INTO users
+            (username, email, password, full_name, role, is_active, is_deleted)
+        VALUES (?, ?, ?, ?, ?, 1, 0)
+        """,
+        (username, email, hash_password(password), username.title(), role),
+    )
+    return email, password
+
+
+def test_company_and_candidate_complete_recruitment_flow_through_real_ui(
+    fresh_db, auth, qt_app, monkeypatch
+):
+    import app.database.schema as schema
+    from app.ui.main_window import MainWindow
+    from PySide6.QtWidgets import QMessageBox
+
+    monkeypatch.setattr(schema, "is_first_run", lambda: False)
+    company_email, company_password = _create_user(
+        fresh_db, "ui-recruitment-company", "company"
+    )
+    candidate_email, candidate_password = _create_user(
+        fresh_db, "ui-recruitment-candidate", "candidate"
+    )
+    expert_email, _ = _create_user(fresh_db, "ui-recruitment-expert", "expert")
+    company_id = fresh_db.fetchone(
+        "SELECT id FROM users WHERE email = ?", (company_email,)
+    )["id"]
+    expert_id = fresh_db.fetchone(
+        "SELECT id FROM users WHERE email = ?", (expert_email,)
+    )["id"]
+    fresh_db.execute(
+        """
+        INSERT INTO company_expert_contracts
+            (company_id, expert_id, contract_code, status)
+        VALUES (?, ?, 'UI-RECRUITMENT-EXPERT-001', 'active')
+        """,
+        (company_id, expert_id),
+    )
+
+    company_login = auth.login(company_email, company_password)
+    assert company_login.success
+    window = MainWindow()
+    window._show_dashboard(company_login.user)
+    _button(window._dashboard, "Tuyển dụng & đánh giá").click()
+    company_screen = window._company_recruitment
+
+    company_screen._position_title.setText("Python Engineer")
+    company_screen._position_location.setText("Remote")
+    company_screen._position_description.setPlainText("Build desktop software")
+    company_screen._position_requirements.setPlainText("Python")
+    company_screen._position_status.setCurrentIndex(
+        company_screen._position_status.findData("published")
+    )
+    company_screen._position_save.click()
+    assert company_screen._positions_table.rowCount() == 1
+    position_id = company_screen._positions[0].id
+    assert fresh_db.fetchone(
+        "SELECT status FROM job_postings WHERE id = ?", (position_id,)
+    )["status"] == "published"
+
+    company_screen._assessment_title.setText("Python Fundamentals")
+    company_screen._question_prompt.setText("Which type is immutable?")
+    company_screen._question_options[0].setText("list")
+    company_screen._question_options[1].setText("tuple")
+    company_screen._correct_option.setCurrentIndex(1)
+    company_screen._question_add.click()
+    assert company_screen._assessment_create.isEnabled()
+    company_screen._assessment_create.click()
+    assert company_screen._assessments_table.rowCount() == 1
+    exam_id = company_screen._assessments[0].id
+
+    company_screen._invite_position.setCurrentIndex(
+        company_screen._invite_position.findData(position_id)
+    )
+    company_screen._invite_assessment.setCurrentIndex(
+        company_screen._invite_assessment.findData(exam_id)
+    )
+    candidate_id = fresh_db.fetchone(
+        "SELECT id FROM users WHERE email = ?", (candidate_email,)
+    )["id"]
+    company_screen._invite_candidate.setCurrentIndex(
+        company_screen._invite_candidate.findData(candidate_id)
+    )
+    company_screen._send_invitation.click()
+    assert fresh_db.fetchone(
+        "SELECT id FROM recruitment_invitations WHERE candidate_id = ?",
+        (candidate_id,),
+    )
+
+    auth.logout()
+    candidate_login = auth.login(candidate_email, candidate_password)
+    assert candidate_login.success
+    window._show_dashboard(candidate_login.user)
+    _button(window._dashboard, "Lời mời làm bài").click()
+    candidate_screen = window._candidate_assessments
+    assert candidate_screen._invitations_table.rowCount() == 1
+    candidate_screen._invitations_table.selectRow(0)
+    candidate_screen._start_exam_button.click()
+    question_id = candidate_screen._exam.questions[0].id
+    correct_option_id = candidate_screen._exam.questions[0].options[1].id
+    candidate_screen._option_buttons[correct_option_id].click()
+    candidate_screen._save_answer_button.click()
+    assert fresh_db.fetchone(
+        "SELECT selected_option_id FROM exam_answers WHERE question_id = ?",
+        (question_id,),
+    )["selected_option_id"] == correct_option_id
+    monkeypatch.setattr(
+        QMessageBox,
+        "question",
+        lambda *args, **kwargs: QMessageBox.StandardButton.Yes,
+    )
+    candidate_screen._submit_exam_button.click()
+    assert not candidate_screen._submit_exam_button.isEnabled()
+    assert fresh_db.fetchone(
+        "SELECT status FROM recruitment_submissions"
+    )["status"] == "graded"
+    candidate_screen._submit_exam()
+    assert fresh_db.fetchone(
+        "SELECT COUNT(*) AS count FROM recruitment_submissions"
+    )["count"] == 1
+
+    auth.logout()
+    company_login = auth.login(company_email, company_password)
+    assert company_login.success
+    window._show_dashboard(company_login.user)
+    _button(window._dashboard, "Tuyển dụng & đánh giá").click()
+    company_screen = window._company_recruitment
+    assert company_screen._results_table.rowCount() == 1
+    company_screen._results_table.selectRow(0)
+    assert company_screen._results_release.isEnabled()
+    company_screen._results_release.click()
+    assert fresh_db.fetchone(
+        "SELECT status FROM recruitment_submissions"
+    )["status"] == "released"
+
+    auth.logout()
+    candidate_login = auth.login(candidate_email, candidate_password)
+    assert candidate_login.success
+    window._show_dashboard(candidate_login.user)
+    _button(window._dashboard, "Lời mời làm bài").click()
+    candidate_screen = window._candidate_assessments
+    candidate_screen._invitations_table.selectRow(0)
+    assert candidate_screen._view_result_button.isEnabled()
+    candidate_screen._view_result_button.click()
+    assert candidate_screen._result_score.text() == "Điểm: 10 / 10"
+    assert "released" in candidate_screen._result_status.text()
     window.close()
