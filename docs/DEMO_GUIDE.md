@@ -104,10 +104,23 @@ Services. The UI displays operation errors rather than substituting demo data.
 Company/Expert registration and Admin account creation after first-run setup
 are not currently available in the UI.
 
+## Supplementary workflow readiness
+
+SQLite persistence for essay/Coding answers, manual grading, monitoring event
+metadata, interviews, and certificates is present and covered by model tests.
+The screens and navigation routes exist, but MainWindow does not yet inject
+concrete Controllers for them; the screens therefore show an unavailable state
+and disable actions. The Service model protocols also do not match the current
+`RecruitmentRepository` method contracts, and certificate issuance has no
+approved-assessment source in the current schema. Submitted code is not
+executed, and monitoring stores metadata only; no camera, screen, or audio
+capture is provided. Do not present these as integrated until the API adapters,
+authorization, and real SQLite UI workflows have been verified.
+
 ## Not implemented or still limited
 
-- Coding/essay exams, manual grading, interview evaluation, certificate
-  issuance, and certificate verification.
+- Coding/essay exam UI, manual grading UI, interview evaluation UI, and
+  certificate issuance/verification UI.
 - Instructor and Student workspaces beyond placeholder dashboard content.
 - Physical skill deletion; use the supported deactivate/reactivate action.
 - Company/Expert role provisioning through public registration; use only the
