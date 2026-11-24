@@ -8,8 +8,10 @@ from server.models.recruitment_models import (
     CodingTestCaseModel,
     ExamAnswerModel,
     ExamAnswerGradingModel,
+    ExamGradeRevisionModel,
     ExamPaperModel,
     ExamQuestionModel,
+    ExamProctoringPolicyModel,
     ExamProctoringSessionModel,
     ExamSessionEventModel,
     ExamSessionModel,
@@ -20,6 +22,7 @@ from server.models.recruitment_models import (
     QuestionOptionModel,
     RecruitmentInvitationModel,
     RecruitmentSubmissionModel,
+    ProctoringVideoModel,
 )
 from server.models.recruitment_repository import RecruitmentRepository
 from server.models.skill_model import SkillModel
@@ -33,8 +36,10 @@ __all__ = [
     "CodingTestCaseModel",
     "ExamAnswerModel",
     "ExamAnswerGradingModel",
+    "ExamGradeRevisionModel",
     "ExamPaperModel",
     "ExamQuestionModel",
+    "ExamProctoringPolicyModel",
     "ExamProctoringSessionModel",
     "ExamSessionEventModel",
     "ExamSessionModel",
@@ -48,6 +53,7 @@ __all__ = [
     "RecruitmentInvitationModel",
     "RecruitmentRepository",
     "RecruitmentSubmissionModel",
+    "ProctoringVideoModel",
     "SkillModel",
     "UserModel",
     "UserRole",

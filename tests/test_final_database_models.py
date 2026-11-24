@@ -7,14 +7,18 @@ import pytest
 from server.database.schema import (
     _mig_008_complete_feature_persistence,
     _mig_007_complete_assessment_data,
+    _mig_010_camera_recording_metadata,
     create_all_tables,
 )
 from server.models.certificate_model import CertificateModel
 from server.models.recruitment_models import (
     CodingTestCaseModel,
+    ExamGradeRevisionModel,
+    ExamProctoringPolicyModel,
     ExamSessionEventModel,
     InterviewEvaluationModel,
     InterviewModel,
+    ProctoringVideoModel,
 )
 from server.models.recruitment_repository import RecruitmentRepository
 
@@ -162,6 +166,12 @@ def test_essay_and_coding_answers_and_test_cases_persist_safely(final_workflow):
         "expected_output"
     ] == "3\n"
     assert repository.list_coding_test_cases(ids["candidate"], coding_id) is None
+    assert repository.list_public_coding_test_cases(
+        session_id, ids["candidate"], coding_id
+    ) == [{"input": "2 3\n", "expected_output": "5\n"}]
+    assert repository.list_public_coding_test_cases(
+        session_id, ids["company"], coding_id
+    ) is None
 
     candidate_questions = repository.list_candidate_questions(session_id, ids["candidate"])
     by_id = {question["id"]: question for question in candidate_questions}
@@ -245,6 +255,19 @@ def test_essay_and_coding_submissions_wait_for_authorized_grading(final_workflow
         "SELECT COUNT(*) FROM exam_grade_revisions WHERE exam_answer_id = ?",
         (revised.id,),
     ).fetchone()[0] == 1
+    revisions = repository.list_exam_grade_revisions(
+        ids["company"],
+        ids["expert"],
+        session_id,
+        question_id=essay_id,
+    )
+    assert len(revisions) == 1
+    assert isinstance(revisions[0], ExamGradeRevisionModel)
+    assert revisions[0].old_score == 8
+    assert revisions[0].new_score == 9
+    assert repository.list_exam_grade_revisions(
+        ids["company"], ids["candidate"], session_id
+    ) == []
 
 
 def test_session_monitoring_events_are_scoped_and_immutable(final_workflow):
@@ -350,6 +373,186 @@ def test_proctoring_evidence_reference_requires_and_records_consent(final_workfl
     )
     assert event.evidence_uri == "evidence://session/42"
     assert event.consent_for_evidence
+
+
+def test_active_video_references_are_scoped(final_workflow):
+    repository = final_workflow["repository"]
+    conn = final_workflow["conn"]
+    ids = final_workflow["user_ids"]
+    session_id = final_workflow["session_id"]
+    outsider_id = conn.execute(
+        """
+        INSERT INTO users (username, email, password, full_name, role)
+        VALUES ('active-video-outsider', 'active-video-outsider@example.test',
+                'test-hash', 'Outsider', 'candidate')
+        """
+    ).lastrowid
+    repository.start_exam_proctoring_session(
+        session_id, ids["candidate"], recording_consent=True
+    )
+    repository.attach_proctoring_video(
+        session_id, ids["company"], "s3://recordings/active.webm"
+    )
+
+    assert repository.get_proctoring_video_for_session(
+        session_id, ids["candidate"]
+    ).video_path == "s3://recordings/active.webm"
+    assert repository.get_proctoring_video_for_session(
+        session_id, ids["expert"]
+    ).video_path == "s3://recordings/active.webm"
+    assert repository.get_proctoring_video_for_session(
+        session_id, outsider_id
+    ) is None
+
+
+def test_camera_recording_video_retention_and_access_are_scoped(final_workflow):
+    repository = final_workflow["repository"]
+    conn = final_workflow["conn"]
+    ids = final_workflow["user_ids"]
+    session_id = final_workflow["session_id"]
+    outsider_id = conn.execute(
+        """
+        INSERT INTO users (username, email, password, full_name, role)
+        VALUES ('monitor-outsider', 'monitor-outsider@example.test',
+                'test-hash', 'Outsider', 'candidate')
+        """
+    ).lastrowid
+
+    proctoring = repository.start_exam_proctoring_session(
+        session_id, ids["candidate"]
+    )
+    assert proctoring.camera_status == "not_started"
+    assert not proctoring.recording_consent
+    with pytest.raises(sqlite3.IntegrityError, match="without explicit consent"):
+        repository.attach_proctoring_video(
+            session_id, ids["company"], "s3://recordings/session-1.webm"
+        )
+
+    proctoring = repository.update_exam_camera_status(
+        session_id, ids["candidate"], camera_status="disconnected"
+    )
+    assert proctoring.camera_status == "disconnected"
+    assert proctoring.camera_status_changed_at
+    repository.update_exam_camera_status(
+        session_id, ids["candidate"], camera_status="disconnected"
+    )
+    repository.record_exam_session_event(
+        session_id, ids["candidate"], "focus_lost", is_violation=True
+    )
+    repository.record_exam_session_event(
+        session_id, ids["candidate"], "timeout", is_violation=True
+    )
+    violations = repository.list_proctoring_violation_history(
+        session_id, ids["candidate"]
+    )
+    assert [event.event_type for event in violations] == [
+        "camera_disconnected",
+        "focus_lost",
+        "timeout",
+    ]
+    assert repository.list_proctoring_violation_history(
+        session_id, outsider_id
+    ) == []
+
+    policy = ExamProctoringPolicyModel(
+        warning_threshold=2,
+        termination_threshold=4,
+        terminate_exam_on_threshold=True,
+        camera_disconnect_timeout_seconds=45,
+        video_retention_days=1,
+    )
+    assert repository.save_exam_proctoring_policy(
+        ids["admin"], policy
+    ) == policy
+    assert repository.get_exam_proctoring_policy() == policy
+    assert repository.save_exam_proctoring_policy(
+        ids["company"], policy
+    ) is None
+    with pytest.raises(sqlite3.IntegrityError, match="below warning"):
+        repository.save_exam_proctoring_policy(
+            ids["admin"],
+            {
+                "warning_threshold": 5,
+                "termination_threshold": 2,
+            },
+        )
+
+    repository.set_exam_recording_consent(
+        session_id, ids["candidate"], consented=True
+    )
+    video = repository.attach_proctoring_video(
+        session_id,
+        ids["company"],
+        "s3://recordings/session-1.webm",
+        created_at="2000-01-01T00:00:00",
+    )
+    assert isinstance(video, ProctoringVideoModel)
+    assert video.video_status == "available"
+    assert video.video_path == "s3://recordings/session-1.webm"
+    assert repository.get_proctoring_video_for_session(
+        session_id, outsider_id
+    ) is None
+
+    stored = conn.execute(
+        """
+        SELECT typeof(video_path) AS path_type, video_path, video_status
+        FROM exam_proctoring_sessions WHERE exam_session_id = ?
+        """,
+        (session_id,),
+    ).fetchone()
+    assert stored["path_type"] == "text"
+    assert stored["video_status"] == "available"
+    assert stored["video_path"] == video.video_path
+    expired = repository.get_proctoring_video_for_session(
+        session_id, ids["company"]
+    )
+    assert expired.video_status == "expired"
+    assert expired.video_path is None
+    expired_for_cleanup = repository.list_expired_proctoring_videos(ids["admin"])
+    assert len(expired_for_cleanup) == 1
+    assert expired_for_cleanup[0].video_path == video.video_path
+    assert repository.list_expired_proctoring_videos(ids["company"]) == []
+    deleted = repository.record_proctoring_video_deleted(
+        session_id, ids["company"]
+    )
+    assert deleted.video_status == "deleted"
+    assert deleted.video_path is None
+    assert deleted.video_deleted_at
+    with pytest.raises(sqlite3.IntegrityError, match="already exists"):
+        repository.attach_proctoring_video(
+            session_id, ids["company"], "s3://recordings/replacement.webm"
+        )
+
+
+def test_monitoring_migration_is_idempotent_and_preserves_existing_data(
+    final_workflow,
+):
+    repository = final_workflow["repository"]
+    conn = final_workflow["conn"]
+    ids = final_workflow["user_ids"]
+    session_id = final_workflow["session_id"]
+    repository.start_exam_proctoring_session(
+        session_id, ids["candidate"], recording_consent=True
+    )
+    repository.update_exam_camera_status(
+        session_id, ids["candidate"], camera_status="active"
+    )
+    repository.attach_proctoring_video(
+        session_id, ids["company"], "file:///external/session.webm"
+    )
+
+    _mig_010_camera_recording_metadata(conn)
+    _mig_010_camera_recording_metadata(conn)
+
+    session = repository.get_exam_proctoring_session(
+        session_id, ids["candidate"]
+    )
+    assert session.camera_status == "active"
+    assert session.recording_consent
+    assert session.video_status == "available"
+    assert repository.get_proctoring_video_for_session(
+        session_id, ids["company"]
+    ).video_path == "file:///external/session.webm"
 
 
 def test_interview_scheduling_and_evaluation_persist_with_scoping(final_workflow):

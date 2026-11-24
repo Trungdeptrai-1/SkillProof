@@ -272,6 +272,35 @@ class ExamAnswerGradingModel:
 
 
 @dataclass(frozen=True, slots=True)
+class ExamGradeRevisionModel:
+    id: int
+    exam_answer_id: int
+    graded_by: int
+    old_score: float | None
+    new_score: float
+    old_feedback: str | None
+    new_feedback: str | None
+    reason: str | None
+    created_at: str
+
+    @classmethod
+    def from_row(cls, row: sqlite3.Row) -> ExamGradeRevisionModel:
+        return cls(
+            id=row["id"],
+            exam_answer_id=row["exam_answer_id"],
+            graded_by=row["graded_by"],
+            old_score=(
+                float(row["old_score"]) if row["old_score"] is not None else None
+            ),
+            new_score=float(row["new_score"]),
+            old_feedback=row["old_feedback"],
+            new_feedback=row["new_feedback"],
+            reason=row["reason"],
+            created_at=row["created_at"],
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class RecruitmentSubmissionModel:
     id: int
     invitation_id: int
@@ -411,12 +440,20 @@ class ExamProctoringSessionModel:
     exam_session_id: int
     candidate_id: int
     consent_for_evidence: bool
+    camera_status: str
+    camera_status_changed_at: str | None
+    recording_consent: bool
+    recording_consent_at: str | None
     status: str
     started_at: str
     ended_at: str | None
     reviewed_by: int | None
     reviewed_at: str | None
     review_notes: str | None
+    video_status: str
+    video_created_at: str | None
+    video_retention_until: str | None
+    video_deleted_at: str | None
 
     @classmethod
     def from_row(cls, row: sqlite3.Row) -> ExamProctoringSessionModel:
@@ -425,13 +462,41 @@ class ExamProctoringSessionModel:
             exam_session_id=row["exam_session_id"],
             candidate_id=row["candidate_id"],
             consent_for_evidence=bool(row["consent_for_evidence"]),
+            camera_status=row["camera_status"],
+            camera_status_changed_at=row["camera_status_changed_at"],
+            recording_consent=bool(row["recording_consent"]),
+            recording_consent_at=row["recording_consent_at"],
             status=row["status"],
             started_at=row["started_at"],
             ended_at=row["ended_at"],
             reviewed_by=row["reviewed_by"],
             reviewed_at=row["reviewed_at"],
             review_notes=row["review_notes"],
+            video_status=row["video_status"],
+            video_created_at=row["video_created_at"],
+            video_retention_until=row["video_retention_until"],
+            video_deleted_at=row["video_deleted_at"],
         )
+
+
+@dataclass(frozen=True, slots=True)
+class ProctoringVideoModel:
+    exam_session_id: int
+    candidate_id: int
+    video_path: str | None
+    video_created_at: str | None
+    video_retention_until: str | None
+    video_deleted_at: str | None
+    video_status: str
+
+
+@dataclass(frozen=True, slots=True)
+class ExamProctoringPolicyModel:
+    warning_threshold: int = 1
+    termination_threshold: int = 3
+    terminate_exam_on_threshold: bool = True
+    camera_disconnect_timeout_seconds: int = 60
+    video_retention_days: int = 30
 
 
 @dataclass(frozen=True, slots=True)

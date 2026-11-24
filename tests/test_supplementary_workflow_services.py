@@ -76,6 +76,16 @@ def _active_exam_session():
     }
 
 
+def _active_proctoring_session(consent_for_evidence: bool = False):
+    return {
+        "id": 13,
+        "exam_session_id": 3,
+        "candidate_id": 9,
+        "status": "active",
+        "consent_for_evidence": consent_for_evidence,
+    }
+
+
 def test_candidate_receives_manual_prompts_without_answer_material():
     _session("candidate", 9)
     model, controller = _manual_controller()
@@ -228,7 +238,7 @@ def test_company_can_schedule_interview_and_only_valid_transitions_apply():
     future = (datetime.now() + timedelta(days=1)).isoformat()
 
     scheduled = controller.schedule(9, "Technical", future, expert_ids=[31])
-    invalid_transition = controller.update_status(4, "completed")
+    invalid_transition = controller.update_status(4, "invalid")
     started = controller.update_status(4, "in_progress")
 
     assert scheduled.success
@@ -275,6 +285,37 @@ def test_interview_evaluator_can_save_scored_feedback():
 
     assert result.success
     assert model.save_interview_evaluation.call_args.kwargs["feedback"] == "Strong debugging"
+
+
+def test_interview_links_are_https_and_returned_only_to_interview_participants():
+    _session("candidate", 9)
+    model, controller = _interview_controller()
+    model.get_interview_for_user.return_value = {
+        "id": 4,
+        "meeting_url": "https://meet.example.test/room",
+    }
+
+    link = controller.get_meeting_link(4)
+    participants = controller.list_participants(4)
+
+    assert link.success and link.value == "https://meet.example.test/room"
+    assert participants.status == InterviewService.WRONG_ROLE
+    model.list_interview_participants.assert_not_called()
+
+    _session("company", 12)
+    model.get_interview_for_user.return_value = {"id": 4, "company_id": 12}
+    model.list_interview_participants.return_value = [{"expert_id": 31}]
+    participants = controller.list_participants(4)
+    assert participants.success and participants.records == ({"expert_id": 31},)
+
+    unsafe_link = controller.schedule(
+        9,
+        "Technical",
+        (datetime.now() + timedelta(days=1)).isoformat(),
+        meeting_url="javascript:alert(1)",
+    )
+    assert unsafe_link.status == InterviewService.INVALID_INPUT
+    model.create_interview.assert_not_called()
 
 
 def test_certificate_requires_approved_candidate_result_and_blocks_duplicates():
@@ -329,43 +370,121 @@ def test_certificate_verification_is_scoped_and_revoke_requires_admin():
     assert revoked.success
 
 
-def test_monitoring_policy_never_labels_focus_event_as_cheating():
+def test_monitoring_starts_only_for_active_candidate_session_with_recorded_consent():
     _session("candidate", 9)
     model, controller = _monitoring_controller()
     model.get_candidate_session.return_value = _active_exam_session()
-    model.record_candidate_monitor_event.return_value = {
+    model.start_exam_proctoring_session.return_value = _active_proctoring_session(True)
+
+    started = controller.start_session(3, consent_for_evidence=True)
+    assert started.success
+    assert model.start_exam_proctoring_session.call_args.kwargs[
+        "consent_for_evidence"
+    ] is True
+
+    model.get_candidate_session.return_value = {"status": "completed"}
+    rejected = controller.start_session(3)
+    assert rejected.status == ExamMonitoringService.EXAM_NOT_ACTIVE
+    assert model.start_exam_proctoring_session.call_count == 1
+
+
+def test_controller_resolves_candidate_active_invitation_for_ui():
+    _session("candidate", 9)
+    model, controller = _monitoring_controller()
+    model.list_candidate_invitations.return_value = [
+        {
+            "status": "accepted",
+            "session_status": "in_progress",
+            "exam_session_id": 3,
+            "exam_title": "Backend assessment",
+        }
+    ]
+    model.get_candidate_session.return_value = _active_exam_session()
+
+    active = controller.get_active_session()
+
+    assert active.success
+    assert active.record["session_id"] == 3
+    assert active.record["title"] == "Backend assessment"
+    assert active.record["status"] == "in_progress"
+    assert active.record["remaining_seconds"] > 0
+
+
+def test_monitoring_focus_threshold_requests_human_review_not_a_guilt_finding():
+    _session("candidate", 9)
+    model, controller = _monitoring_controller()
+    model.get_candidate_session.return_value = _active_exam_session()
+    model.get_exam_proctoring_session.return_value = _active_proctoring_session()
+    model.list_exam_session_events.return_value = [
+        {"event_type": "focus_lost"},
+        {"event_type": "focus_lost"},
+    ]
+    model.record_exam_session_event.return_value = {
         "event_type": "focus_lost",
-        "outcome": "manual_review_required",
-        "focus_event_count": 3,
+        "is_violation": True,
     }
 
     result = controller.record_event(3, "focus_lost")
 
     assert result.success
-    assert result.value == "manual_review_required"
+    assert result.value["outcome"] == "manual_review_required"
+    assert result.value["focus_event_count"] == 3
     assert "cheat" not in result.message.lower()
-    assert model.record_candidate_monitor_event.call_args.kwargs[
-        "focus_review_threshold"
-    ] == 3
+    assert model.record_exam_session_event.call_args.kwargs["is_violation"] is True
+    model.finish_exam_proctoring_session.assert_not_called()
 
 
-def test_camera_loss_is_technical_only_and_timeout_requires_server_deadline():
+def test_monitoring_threshold_is_configurable_without_auto_ending_exam():
+    _session("candidate", 9)
+    model = Mock(spec=ExamMonitoringModel)
+    controller = ExamMonitoringController(
+        ExamMonitoringService(model, focus_review_threshold=1)
+    )
+    model.get_candidate_session.return_value = _active_exam_session()
+    model.get_exam_proctoring_session.return_value = _active_proctoring_session()
+    model.list_exam_session_events.return_value = []
+    model.record_exam_session_event.return_value = {
+        "event_type": "focus_lost",
+        "is_violation": True,
+    }
+
+    result = controller.record_event(3, "focus_lost")
+
+    assert result.success
+    assert result.value["outcome"] == "manual_review_required"
+    assert model.record_exam_session_event.call_args.kwargs["is_violation"] is True
+    model.finish_exam_proctoring_session.assert_not_called()
+
+
+def test_camera_disconnection_is_technical_and_not_a_violation():
     _session("candidate", 9)
     model, controller = _monitoring_controller()
     model.get_candidate_session.return_value = _active_exam_session()
-    model.record_candidate_monitor_event.return_value = {
-        "event_type": "camera_unavailable",
-        "outcome": "technical_warning",
+    model.get_exam_proctoring_session.return_value = _active_proctoring_session()
+    model.record_exam_session_event.return_value = {
+        "event_type": "camera_disconnected",
+        "is_violation": False,
     }
-    camera = controller.record_event(3, "camera_unavailable")
-    assert camera.value == "technical_warning"
-    assert model.record_candidate_monitor_event.call_args.kwargs["timeout_verified"] is False
+    camera = controller.record_camera_status(3, "disconnected")
+
+    assert camera.success
+    assert camera.value["outcome"] == "technical_warning"
+    assert model.record_exam_session_event.call_args.args[2] == "camera_disconnected"
+    assert model.record_exam_session_event.call_args.kwargs["is_violation"] is False
+
+
+def test_timeout_event_requires_server_verified_deadline():
+    _session("candidate", 9)
+    model, controller = _monitoring_controller()
+    model.get_candidate_session.return_value = _active_exam_session()
+    model.get_exam_proctoring_session.return_value = _active_proctoring_session()
 
     too_early = controller.record_event(3, "timeout")
     assert too_early.status == ExamMonitoringService.TIMEOUT_NOT_VERIFIED
+    model.record_exam_session_event.assert_not_called()
 
 
-def test_monitoring_timeout_is_accepted_only_after_session_duration():
+def test_timeout_event_is_non_accusatory_and_does_not_change_exam_state():
     _session("candidate", 9)
     model, controller = _monitoring_controller()
     model.get_candidate_session.return_value = {
@@ -373,29 +492,113 @@ def test_monitoring_timeout_is_accepted_only_after_session_duration():
         "started_at": (datetime.now() - timedelta(minutes=5)).isoformat(),
         "duration_min": 1,
     }
-    model.record_candidate_monitor_event.return_value = {
+    model.get_exam_proctoring_session.return_value = _active_proctoring_session()
+    model.record_exam_session_event.return_value = {
         "event_type": "timeout",
-        "outcome": "timeout_recorded",
+        "is_violation": False,
     }
 
     result = controller.record_event(3, "timeout")
 
     assert result.success
-    assert model.record_candidate_monitor_event.call_args.kwargs["timeout_verified"] is True
+    assert result.value["outcome"] == "timeout_recorded"
+    assert model.record_exam_session_event.call_args.kwargs["is_violation"] is False
+    model.finish_exam_proctoring_session.assert_not_called()
 
 
-def test_monitoring_rejects_repository_outcome_that_breaks_event_policy():
+def test_evidence_reference_requires_explicit_persisted_consent():
     _session("candidate", 9)
     model, controller = _monitoring_controller()
     model.get_candidate_session.return_value = _active_exam_session()
-    model.record_candidate_monitor_event.return_value = {
-        "event_type": "camera_unavailable",
-        "outcome": "manual_review_required",
+    model.get_exam_proctoring_session.return_value = _active_proctoring_session(False)
+
+    result = controller.record_event(
+        3, "camera_disconnected", evidence_uri="evidence://session/13/frame"
+    )
+
+    assert result.status == ExamMonitoringService.CONSENT_REQUIRED
+    model.record_exam_session_event.assert_not_called()
+
+
+def test_consented_evidence_reference_is_still_opaque_and_never_media_bytes():
+    _session("candidate", 9)
+    model, controller = _monitoring_controller()
+    model.get_candidate_session.return_value = _active_exam_session()
+    model.get_exam_proctoring_session.return_value = _active_proctoring_session(True)
+    model.record_exam_session_event.return_value = {
+        "id": 18,
+        "event_type": "camera_active",
+        "evidence_uri": "evidence://vault/capture/18",
     }
 
-    result = controller.record_event(3, "camera_unavailable")
+    result = controller.record_camera_status(
+        3,
+        "active",
+        evidence_uri="evidence://vault/capture/18",
+    )
 
-    assert result.status == ExamMonitoringService.DB_ERROR
+    assert result.success
+    assert model.record_exam_session_event.call_args.kwargs["evidence_uri"] == (
+        "evidence://vault/capture/18"
+    )
+    assert not controller.record_camera_status(
+        3,
+        "active",
+        evidence_uri="data:image/jpeg;base64,abc",
+    ).success
+
+
+def test_monitoring_event_details_reject_media_or_answer_payloads():
+    _session("candidate", 9)
+    model, controller = _monitoring_controller()
+
+    result = controller.record_event(
+        3,
+        "focus_lost",
+        details={"screenshot_data": "x"},
+    )
+
+    assert result.status == ExamMonitoringService.INVALID_INPUT
+    model.record_exam_session_event.assert_not_called()
+
+
+def test_finish_monitoring_closes_only_the_monitor_session():
+    _session("candidate", 9)
+    model, controller = _monitoring_controller()
+    model.finish_exam_proctoring_session.return_value = {
+        "status": "completed",
+        "ended_at": "2026-11-24T11:00:00",
+    }
+
+    result = controller.finish_session(3)
+
+    assert result.success
+    model.finish_exam_proctoring_session.assert_called_once_with(3, 9)
+    model.get_candidate_session.assert_not_called()
+
+
+def test_company_or_contracted_expert_can_review_events_through_repository_scope():
+    _session("expert", 12)
+    model, controller = _monitoring_controller()
+    model.get_exam_session_context.return_value = {"company_id": 8}
+    model.get_company_exam_proctoring_session.return_value = _active_proctoring_session()
+    model.list_company_exam_session_events.return_value = [
+        {"id": 5, "event_type": "focus_lost", "is_violation": True}
+    ]
+    model.review_exam_session_event.return_value = {
+        "event_type": "focus_lost",
+        "processing_status": "reviewed",
+    }
+
+    events = controller.list_company_events(3, violations_only=True)
+    reviewed = controller.review_event(3, 5, "reviewed", notes="Reviewed context")
+
+    assert events.success and len(events.records) == 1
+    assert reviewed.success
+    assert model.list_company_exam_session_events.call_args.kwargs[
+        "requester_id"
+    ] == 12
+    assert model.review_exam_session_event.call_args.args[:3] == (8, 12, 5)
 
 
 def test_controllers_reject_malformed_ids_without_calling_services():

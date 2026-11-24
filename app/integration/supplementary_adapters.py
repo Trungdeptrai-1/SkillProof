@@ -3,8 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import asdict, is_dataclass
-from datetime import datetime
+from dataclasses import asdict, dataclass, is_dataclass
 from itertools import count
 
 from app.services.auth_service import SessionManager
@@ -33,6 +32,13 @@ from server.services.interview_service import InterviewService
 from server.services.manual_assessment_service import ManualAssessmentService
 
 Record = Mapping[str, object]
+
+
+@dataclass(frozen=True)
+class ExternalMeetingLinkResult:
+    success: bool
+    url: str | None = None
+    message: str = ""
 
 
 def _record(value: object) -> Record | None:
@@ -245,79 +251,41 @@ class _MonitoringRepositoryAdapter:
     def get_candidate_session(self, session_id: int, candidate_id: int):
         return self._repository.get_candidate_session(session_id, candidate_id)
 
-    def record_candidate_monitor_event(
-        self,
-        session_id: int,
-        candidate_id: int,
-        event_type: str,
-        *,
-        timeout_verified: bool,
-        focus_review_threshold: int,
+    def list_candidate_invitations(self, candidate_id: int):
+        return self._repository.list_candidate_invitations(candidate_id)
+
+    def start_exam_proctoring_session(
+        self, session_id: int, candidate_id: int, *, consent_for_evidence: bool
     ):
-        if event_type == "timeout":
-            self._repository.record_exam_session_event(
-                session_id,
-                candidate_id,
-                "timeout",
-                details={"source": "local_exam_timer"},
-            )
-            return {"outcome": "timeout_recorded", "focus_event_count": 0}
-        event = self._repository.record_exam_session_event(
+        return self._repository.start_exam_proctoring_session(
             session_id,
             candidate_id,
-            event_type,
-            is_violation=False,
-            details={
-                "source": (
-                    "local_camera"
-                    if event_type == "camera_unavailable"
-                    else "local_application_focus"
-                )
-            },
-        )
-        events = self._repository.list_exam_session_events(
-            session_id, candidate_id
-        )
-        focus_count = sum(item.event_type == "focus_lost" for item in events)
-        if event_type == "camera_unavailable":
-            outcome = "technical_warning"
-        else:
-            outcome = (
-                "manual_review_required"
-                if focus_count >= focus_review_threshold
-                else "warning"
-            )
-        return {
-            "event_id": event.id,
-            "outcome": outcome,
-            "focus_event_count": focus_count,
-        }
-
-    def can_review_monitor_events(
-        self, reviewer_id: int, role: str, session_id: int
-    ) -> bool:
-        context = self._repository.get_exam_session_context(session_id)
-        company_id = context.get("company_id") if context is not None else None
-        return (
-            role in {"company", "expert"}
-            and isinstance(company_id, int)
-            and self._repository.get_company_exam_proctoring_session(
-                company_id, session_id, requester_id=reviewer_id
-            )
-            is not None
+            consent_for_evidence=consent_for_evidence,
         )
 
-    def list_monitor_events_for_reviewer(
-        self, reviewer_id: int, role: str, session_id: int
-    ):
-        context = self._repository.get_exam_session_context(session_id)
-        company_id = context.get("company_id") if context is not None else None
-        if not isinstance(company_id, int):
-            return ()
-        events = self._repository.list_company_exam_session_events(
-            company_id, session_id, requester_id=reviewer_id
-        )
-        return tuple(_record(event) for event in events)
+    def get_exam_proctoring_session(self, session_id: int, candidate_id: int):
+        return self._repository.get_exam_proctoring_session(session_id, candidate_id)
+
+    def finish_exam_proctoring_session(self, session_id: int, candidate_id: int):
+        return self._repository.finish_exam_proctoring_session(session_id, candidate_id)
+
+    def record_exam_session_event(self, *args, **kwargs):
+        return self._repository.record_exam_session_event(*args, **kwargs)
+
+    def list_exam_session_events(self, *args, **kwargs):
+        return self._repository.list_exam_session_events(*args, **kwargs)
+
+    def get_exam_session_context(self, session_id: int):
+        return self._repository.get_exam_session_context(session_id)
+
+    def get_company_exam_proctoring_session(self, *args, **kwargs):
+        return self._repository.get_company_exam_proctoring_session(*args, **kwargs)
+
+    def list_company_exam_session_events(self, *args, **kwargs):
+        return self._repository.list_company_exam_session_events(*args, **kwargs)
+
+    def review_exam_session_event(self, *args, **kwargs):
+        return self._repository.review_exam_session_event(*args, **kwargs)
 
 
 class _InterviewRepositoryAdapter:
@@ -342,7 +310,7 @@ class _InterviewRepositoryAdapter:
 
     def list_user_interviews(self, user_id: int, role: str):
         rows = self._repository.list_user_interview_records(user_id, role)
-        return tuple(_record(row) for row in rows)
+        return tuple(record for row in rows if (record := _record(row)) is not None)
 
     def get_interview_for_user(
         self, interview_id: int, user_id: int, role: str
@@ -402,6 +370,16 @@ class _InterviewRepositoryAdapter:
         else:
             return ()
         return tuple(_record(record) for record in records)
+
+    def list_interview_participants(self, company_id: int, interview_id: int):
+        participants = self._repository.list_interview_participants(
+            company_id, interview_id
+        )
+        return tuple(
+            record
+            for participant in participants
+            if (record := _record(participant)) is not None
+        )
 
 
 class _CertificateRepositoryAdapter:
@@ -692,74 +670,64 @@ class ExamMonitorViewAdapter:
         self._controller = controller
 
     def get_active_session(self) -> ActiveExamSession | None:
-        identity = _identity()
-        if identity is None or identity[1] != "candidate":
+        result = self._controller.get_active_session()
+        if not result.success or result.record is None:
             return None
-        for invitation in self._repository.list_candidate_invitations(identity[0]):
-            session_id = invitation.get("exam_session_id")
-            if (
-                invitation.get("status") != "accepted"
-                or invitation.get("session_status") != "in_progress"
-                or not isinstance(session_id, int)
-            ):
-                continue
-            session = self._repository.get_candidate_session(session_id, identity[0])
-            if session is None:
-                continue
-            started_at = session.get("started_at")
-            duration = session.get("duration_min")
-            if not isinstance(started_at, str) or not isinstance(duration, int):
-                continue
-            try:
-                started = datetime.fromisoformat(started_at)
-            except ValueError:
-                continue
-            now = datetime.now(started.tzinfo) if started.tzinfo else datetime.now()
-            remaining = max(0, duration * 60 - int((now - started).total_seconds()))
-            return ActiveExamSession(
-                session_id,
-                str(invitation.get("exam_title") or ""),
-                "in_progress",
-                remaining,
-            )
-        return None
+        record = result.record
+        session_id = record.get("session_id")
+        remaining = record.get("remaining_seconds")
+        if (
+            not isinstance(session_id, int)
+            or isinstance(session_id, bool)
+            or not isinstance(remaining, int)
+            or isinstance(remaining, bool)
+        ):
+            return None
+        return ActiveExamSession(
+            session_id,
+            str(record.get("title") or ""),
+            str(record.get("status") or ""),
+            max(0, remaining),
+        )
 
     def start_monitoring(self, session_id: int) -> WorkflowActionResult:
-        identity = _identity()
-        if identity is None or identity[1] != "candidate":
-            return WorkflowActionResult(False, "Candidate cần đăng nhập.")
-        result = self._repository.start_exam_proctoring_session(
-            session_id, identity[0], consent_for_evidence=False
+        result = self._controller.start_session(
+            session_id, consent_for_evidence=False
         )
-        if result is None or result.status != "active":
-            return WorkflowActionResult(False, "Phiên thi không còn hoạt động.")
+        if not result.success:
+            return WorkflowActionResult(False, result.message, result.status)
         return WorkflowActionResult(True, "Đã bắt đầu ghi nhận sự kiện focus.")
 
     def record_focus_lost(self, session_id: int) -> WorkflowActionResult:
         result = self._controller.record_event(session_id, "focus_lost")
-        return WorkflowActionResult(result.success, result.message, str(result.value or ""))
+        outcome = result.value.get("outcome") if isinstance(result.value, Mapping) else ""
+        return WorkflowActionResult(result.success, result.message, str(outcome or ""))
 
     def record_camera_unavailable(self, session_id: int) -> WorkflowActionResult:
-        result = self._controller.record_event(session_id, "camera_unavailable")
-        return WorkflowActionResult(result.success, result.message, str(result.value or ""))
+        """Translate a UI camera outage into the service's technical event."""
+        return self.record_camera_status(session_id, "disconnected")
 
     def record_timeout(self, session_id: int) -> WorkflowActionResult:
         result = self._controller.record_event(session_id, "timeout")
-        return WorkflowActionResult(result.success, result.message, str(result.value or ""))
+        outcome = result.value.get("outcome") if isinstance(result.value, Mapping) else ""
+        return WorkflowActionResult(result.success, result.message, str(outcome or ""))
+
+    def record_camera_status(
+        self,
+        session_id: int,
+        status: str,
+        *,
+        evidence_uri: str | None = None,
+    ) -> WorkflowActionResult:
+        result = self._controller.record_camera_status(
+            session_id, status, evidence_uri=evidence_uri
+        )
+        outcome = result.value.get("outcome") if isinstance(result.value, Mapping) else ""
+        return WorkflowActionResult(result.success, result.message, str(outcome or ""))
 
     def stop_monitoring(self, session_id: int) -> WorkflowActionResult:
-        identity = _identity()
-        if identity is None or identity[1] != "candidate":
-            return WorkflowActionResult(False, "Candidate cần đăng nhập.")
-        result = self._repository.finish_exam_proctoring_session(
-            session_id, identity[0]
-        )
-        return WorkflowActionResult(
-            result is not None,
-            "Đã kết thúc ghi nhận sự kiện."
-            if result is not None
-            else "Không tìm thấy phiên giám sát đang hoạt động.",
-        )
+        result = self._controller.finish_session(session_id)
+        return WorkflowActionResult(result.success, result.message, result.status)
 
 
 class InterviewViewAdapter:
@@ -822,18 +790,37 @@ class InterviewViewAdapter:
         )
         return WorkflowActionResult(result.success, result.message, result.status)
 
+    def get_meeting_link(self, interview_id: int) -> ExternalMeetingLinkResult:
+        result = self._controller.get_meeting_link(interview_id)
+        link = result.value if isinstance(result.value, str) else ""
+        return ExternalMeetingLinkResult(
+            result.success,
+            link or None,
+            result.message
+            if not result.success
+            else ("" if link else "Chưa có liên kết họp."),
+        )
+
+    def list_participants(self, interview_id: int) -> WorkflowListResult[Record]:
+        result = self._controller.list_participants(interview_id)
+        if not result.success:
+            return WorkflowListResult(False, message=result.message)
+        return WorkflowListResult(True, tuple(result.records))
+
     def schedule_interview(
         self,
         candidate_id: int,
         title: str,
         scheduled_at: str,
         expert_ids: tuple[int, ...] = (),
+        meeting_url: str | None = None,
     ) -> WorkflowActionResult:
         result = self._controller.schedule(
             candidate_id,
             title,
             scheduled_at,
             duration_min=60,
+            meeting_url=meeting_url,
             expert_ids=expert_ids,
         )
         return WorkflowActionResult(result.success, result.message, result.status)
@@ -924,10 +911,15 @@ class CertificateViewAdapter:
 
 def create_supplementary_view_controllers(
     repository: RecruitmentRepository | None = None,
+    *,
+    focus_review_threshold: int = 3,
 ):
     repo = repository or RecruitmentRepository()
     manual_service = ManualAssessmentService(_ManualAssessmentRepositoryAdapter(repo))
-    monitoring_service = ExamMonitoringService(_MonitoringRepositoryAdapter(repo))
+    monitoring_service = ExamMonitoringService(
+        _MonitoringRepositoryAdapter(repo),
+        focus_review_threshold=focus_review_threshold,
+    )
     interview_service = InterviewService(_InterviewRepositoryAdapter(repo))
     certificate_service = CertificateService(_CertificateRepositoryAdapter(repo))
     manual = ServiceManualAssessmentController(manual_service)
