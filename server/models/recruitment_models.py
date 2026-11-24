@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 import sqlite3
+from collections.abc import Mapping
 from typing import Literal
 
 
@@ -248,4 +250,126 @@ class CandidateExamResultModel:
             max_score=float(row["max_score"]),
             graded_at=row["graded_at"],
             released_at=row["released_at"],
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class CodingTestCaseModel:
+    input: str
+    expected_output: str
+    is_hidden: bool
+
+    @classmethod
+    def from_mapping(cls, value: Mapping[str, object]) -> CodingTestCaseModel:
+        input_value = value.get("input")
+        expected_output = value.get("expected_output")
+        is_hidden = value.get("is_hidden", False)
+        if (
+            not isinstance(input_value, str)
+            or not isinstance(expected_output, str)
+            or not isinstance(is_hidden, bool)
+        ):
+            raise ValueError("Invalid coding test case.")
+        return cls(input_value, expected_output, is_hidden)
+
+    @classmethod
+    def from_json(cls, value: str) -> list[CodingTestCaseModel]:
+        try:
+            data = json.loads(value)
+        except (TypeError, json.JSONDecodeError) as exc:
+            raise ValueError("Invalid coding test cases.") from exc
+        if not isinstance(data, list):
+            raise ValueError("Coding test cases must be a list.")
+        if any(not isinstance(item, Mapping) for item in data):
+            raise ValueError("Invalid coding test case.")
+        return [cls.from_mapping(item) for item in data]
+
+
+@dataclass(frozen=True, slots=True)
+class ExamSessionEventModel:
+    id: int
+    exam_session_id: int
+    candidate_id: int
+    event_type: str
+    is_violation: bool
+    details: dict[str, object] | None
+    occurred_at: str
+
+    @classmethod
+    def from_row(cls, row: sqlite3.Row) -> ExamSessionEventModel:
+        raw_details = row["details_json"]
+        details = None
+        if raw_details is not None:
+            try:
+                details = json.loads(raw_details)
+            except json.JSONDecodeError as exc:
+                raise ValueError("Invalid exam event details.") from exc
+            if not isinstance(details, dict):
+                raise ValueError("Exam event details must be an object.")
+        return cls(
+            id=row["id"],
+            exam_session_id=row["exam_session_id"],
+            candidate_id=row["candidate_id"],
+            event_type=row["event_type"],
+            is_violation=bool(row["is_violation"]),
+            details=details,
+            occurred_at=row["occurred_at"],
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class InterviewModel:
+    id: int
+    candidate_id: int
+    company_id: int | None
+    title: str
+    description: str | None
+    status: str
+    scheduled_at: str
+    duration_min: int
+    meeting_url: str | None
+    created_at: str
+
+    @classmethod
+    def from_row(cls, row: sqlite3.Row) -> InterviewModel:
+        return cls(
+            id=row["id"],
+            candidate_id=row["candidate_id"],
+            company_id=row["company_id"],
+            title=row["title"],
+            description=row["description"],
+            status=row["status"],
+            scheduled_at=row["scheduled_at"],
+            duration_min=row["duration_min"],
+            meeting_url=row["meeting_url"],
+            created_at=row["created_at"],
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class InterviewEvaluationModel:
+    id: int
+    interview_id: int
+    expert_id: int
+    technical_score: int | None
+    communication_score: int | None
+    problem_solving_score: int | None
+    overall_rating: int | None
+    feedback: str | None
+    recommendation: str | None
+    created_at: str
+
+    @classmethod
+    def from_row(cls, row: sqlite3.Row) -> InterviewEvaluationModel:
+        return cls(
+            id=row["id"],
+            interview_id=row["interview_id"],
+            expert_id=row["expert_id"],
+            technical_score=row["technical_score"],
+            communication_score=row["communication_score"],
+            problem_solving_score=row["problem_solving_score"],
+            overall_rating=row["overall_rating"],
+            feedback=row["feedback"],
+            recommendation=row["recommendation"],
+            created_at=row["created_at"],
         )

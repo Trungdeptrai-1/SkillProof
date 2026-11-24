@@ -2,12 +2,17 @@
 
 from server.models.admin_statistics_model import AdminStatisticsModel
 from server.models.app_setting_model import AppSettingModel
+from server.models.certificate_model import CertificateModel
 from server.models.recruitment_models import (
     CandidateExamResultModel,
+    CodingTestCaseModel,
     ExamAnswerModel,
     ExamPaperModel,
     ExamQuestionModel,
+    ExamSessionEventModel,
     ExamSessionModel,
+    InterviewEvaluationModel,
+    InterviewModel,
     JobPostingModel,
     QuestionOptionModel,
     RecruitmentInvitationModel,
@@ -21,10 +26,15 @@ __all__ = [
     "AdminStatisticsModel",
     "AppSettingModel",
     "CandidateExamResultModel",
+    "CertificateModel",
+    "CodingTestCaseModel",
     "ExamAnswerModel",
     "ExamPaperModel",
     "ExamQuestionModel",
+    "ExamSessionEventModel",
     "ExamSessionModel",
+    "InterviewEvaluationModel",
+    "InterviewModel",
     "JobPostingModel",
     "QuestionOptionModel",
     "ROLE_ICONS",

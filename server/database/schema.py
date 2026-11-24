@@ -144,6 +144,7 @@ def _apply_migrations(conn: sqlite3.Connection) -> None:
     _mig_004_create_business_tables(conn)
     _mig_005_extend_contracts_and_softdelete(conn)
     _mig_006_create_recruitment_workflow(conn)
+    _mig_007_complete_assessment_data(conn)
 
 
 # ── MIG-001 ───────────────────────────────────────────────────────────────────
@@ -1197,6 +1198,96 @@ def _mig_006_create_recruitment_workflow(conn: sqlite3.Connection) -> None:
     logger.info("MIG-006: recruitment tables, constraints and triggers are ready.")
 
 
+def _mig_007_complete_assessment_data(conn: sqlite3.Connection) -> None:
+    """MIG-007: Persist exam monitoring events and certificate revocation data."""
+    required_tables = {"exam_sessions", "certificates", "users"}
+    existing_tables = {
+        row[0]
+        for row in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        ).fetchall()
+    }
+    missing_tables = required_tables - existing_tables
+    if missing_tables:
+        raise RuntimeError(
+            f"MIG-007 requires existing tables: {sorted(missing_tables)}"
+        )
+
+    certificate_columns = {
+        row["name"] for row in conn.execute("PRAGMA table_info(certificates)")
+    }
+    if "revoked_at" not in certificate_columns:
+        conn.execute("ALTER TABLE certificates ADD COLUMN revoked_at TEXT")
+    if "revoked_by" not in certificate_columns:
+        conn.execute(
+            "ALTER TABLE certificates ADD COLUMN revoked_by INTEGER "
+            "REFERENCES users(id) ON DELETE SET NULL"
+        )
+    if "revocation_reason" not in certificate_columns:
+        conn.execute("ALTER TABLE certificates ADD COLUMN revocation_reason TEXT")
+
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS exam_session_events (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            exam_session_id INTEGER NOT NULL
+                            REFERENCES exam_sessions(id) ON DELETE CASCADE,
+            candidate_id    INTEGER NOT NULL
+                            REFERENCES users(id) ON DELETE CASCADE,
+            event_type      TEXT NOT NULL CHECK(length(trim(event_type)) > 0),
+            is_violation    INTEGER NOT NULL DEFAULT 0
+                            CHECK(is_violation IN (0, 1)),
+            details_json    TEXT,
+            occurred_at     TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_exam_session_events_session_time
+            ON exam_session_events(exam_session_id, occurred_at, id);
+        CREATE INDEX IF NOT EXISTS idx_exam_session_events_violations
+            ON exam_session_events(is_violation, occurred_at);
+
+        CREATE TRIGGER IF NOT EXISTS trg_exam_session_events_valid_session
+        BEFORE INSERT ON exam_session_events
+        WHEN NOT EXISTS (
+            SELECT 1 FROM exam_sessions
+            WHERE id = NEW.exam_session_id
+              AND candidate_id = NEW.candidate_id
+              AND status = 'in_progress'
+        )
+        BEGIN
+            SELECT RAISE(ABORT, 'exam event requires the candidate active session');
+        END;
+
+        CREATE TRIGGER IF NOT EXISTS trg_exam_session_events_immutable
+        BEFORE UPDATE ON exam_session_events
+        BEGIN
+            SELECT RAISE(ABORT, 'exam events are immutable');
+        END;
+
+        CREATE TRIGGER IF NOT EXISTS trg_certificate_revocation_data
+        BEFORE UPDATE OF status ON certificates
+        WHEN NEW.status = 'revoked' AND OLD.status <> 'revoked'
+         AND (
+            NEW.revoked_at IS NULL
+            OR NEW.revoked_by IS NULL
+            OR NEW.revocation_reason IS NULL
+            OR length(trim(NEW.revocation_reason)) = 0
+         )
+        BEGIN
+            SELECT RAISE(ABORT, 'revocation requires actor, time, and reason');
+        END;
+
+        CREATE TRIGGER IF NOT EXISTS trg_certificate_revoked_status_immutable
+        BEFORE UPDATE OF status ON certificates
+        WHEN OLD.status = 'revoked' AND NEW.status <> 'revoked'
+        BEGIN
+            SELECT RAISE(ABORT, 'revoked certificates cannot be reactivated');
+        END;
+        """
+    )
+    conn.commit()
+    logger.info("MIG-007: exam event and certificate revocation data are ready.")
+
+
 # ── Tiện ích ──────────────────────────────────────────────────────────────────
 
 def drop_all_tables() -> None:
@@ -1206,6 +1297,7 @@ def drop_all_tables() -> None:
         "recruitment_submissions",
         "recruitment_invitations",
         "job_postings",
+        "exam_session_events",
     ]
     # Business tables (MIG-004/005) — drop theo thứ tự ngược FK
     business_tables = [

@@ -325,11 +325,12 @@ class TestCreateAllTables:
             "job_postings",
             "recruitment_invitations",
             "recruitment_submissions",
+            "exam_session_events",
         }
         assert old_tables <= tables, "Thiếu bảng cũ"
         assert new_tables <= tables, "Thiếu bảng mới (MIG-004)"
         assert recruitment_tables <= tables, "Thiếu bảng tuyển dụng (MIG-006)"
-        assert len(tables) == 25, f"Expected 25, got {len(tables)}"
+        assert len(tables) == 26, f"Expected 26, got {len(tables)}"
 
     def test_legacy_db_full_migration(self, legacy_db):
         """
