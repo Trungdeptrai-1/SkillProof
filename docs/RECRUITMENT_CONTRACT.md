@@ -173,13 +173,16 @@ Coding/essay grading and manual score adjustment are not implemented. A
 successful submission response contains no score; the Candidate result query
 returns a score only after the Company releases that exam's graded submissions.
 
-## Additional View contracts awaiting backend support
+## Additional Views awaiting Service/Controller integration
 
 The essay/Coding, manual grading, interview, monitoring, and certificate screens
 use typed Protocols in `client/views/extended_workflow_contracts.py`. MainWindow
 accepts optional Controller implementations for integration. Until a real
 Controller is supplied, affected lists remain empty and business actions are
 disabled with an explanation; the application does not seed demonstration data.
+Persistence DTOs and repository entry points for these workflows are documented
+in `docs/FINAL_FEATURE_CONTRACT.md`; no matching Service/Controller APIs are
+currently connected to the Views.
 
 Required integration boundaries:
 
