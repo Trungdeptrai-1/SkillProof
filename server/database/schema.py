@@ -147,6 +147,7 @@ def _apply_migrations(conn: sqlite3.Connection) -> None:
     _mig_007_complete_assessment_data(conn)
     _mig_008_complete_feature_persistence(conn)
     _mig_009_approved_assessment_sources(conn)
+    _mig_010_camera_recording_metadata(conn)
 
 
 # ── MIG-001 ───────────────────────────────────────────────────────────────────
@@ -1551,6 +1552,212 @@ def _mig_009_approved_assessment_sources(conn: sqlite3.Connection) -> None:
     )
     conn.commit()
     logger.info("MIG-009: approved assessment sources are ready.")
+
+
+def _mig_010_camera_recording_metadata(conn: sqlite3.Connection) -> None:
+    """MIG-010: Extend existing proctor sessions with camera/video metadata."""
+    tables = {
+        row[0]
+        for row in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        ).fetchall()
+    }
+    if "exam_proctoring_sessions" not in tables:
+        raise RuntimeError("MIG-010 requires exam_proctoring_sessions.")
+
+    columns = {
+        row["name"]
+        for row in conn.execute("PRAGMA table_info(exam_proctoring_sessions)")
+    }
+    additions = {
+        "camera_status": (
+            "TEXT NOT NULL DEFAULT 'not_started' "
+            "CHECK(camera_status IN ("
+            "'not_started','active','disconnected','permission_denied','off'))"
+        ),
+        "camera_status_changed_at": "TEXT",
+        "recording_consent": (
+            "INTEGER NOT NULL DEFAULT 0 CHECK(recording_consent IN (0, 1))"
+        ),
+        "recording_consent_at": "TEXT",
+        "video_path": (
+            "TEXT CHECK(video_path IS NULL OR (typeof(video_path) = 'text' AND "
+            "lower(substr(video_path, 1, 5)) <> 'data:'))"
+        ),
+        "video_created_at": "TEXT",
+        "video_retention_until": "TEXT",
+        "video_deleted_at": "TEXT",
+        "video_status": (
+            "TEXT NOT NULL DEFAULT 'not_recorded' "
+            "CHECK(video_status IN ('not_recorded','available','expired','deleted'))"
+        ),
+    }
+    for column, definition in additions.items():
+        if column not in columns:
+            conn.execute(
+                f"ALTER TABLE exam_proctoring_sessions "
+                f"ADD COLUMN {column} {definition}"
+            )
+
+    conn.executescript(
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_exam_proctoring_video_path
+            ON exam_proctoring_sessions(video_path)
+            WHERE video_path IS NOT NULL;
+        CREATE INDEX IF NOT EXISTS idx_exam_proctoring_camera_status
+            ON exam_proctoring_sessions(camera_status, camera_status_changed_at);
+        CREATE INDEX IF NOT EXISTS idx_exam_proctoring_video_retention
+            ON exam_proctoring_sessions(video_status, video_retention_until);
+
+        DROP TRIGGER IF EXISTS trg_exam_proctoring_recording_metadata_insert;
+        DROP TRIGGER IF EXISTS trg_exam_proctoring_recording_metadata_update;
+        CREATE TRIGGER trg_exam_proctoring_recording_metadata_insert
+        BEFORE INSERT ON exam_proctoring_sessions
+        WHEN (
+            NEW.recording_consent = 1 AND NEW.recording_consent_at IS NULL
+        ) OR (
+            NEW.recording_consent = 0 AND NEW.recording_consent_at IS NOT NULL
+        ) OR (
+            NEW.video_path IS NOT NULL
+            AND (
+                NEW.recording_consent <> 1
+                OR NEW.recording_consent_at IS NULL
+                OR NEW.video_status NOT IN ('available','expired')
+            )
+        ) OR (
+            NEW.video_status = 'not_recorded'
+            AND (
+                NEW.video_path IS NOT NULL OR NEW.video_created_at IS NOT NULL
+                OR NEW.video_retention_until IS NOT NULL
+                OR NEW.video_deleted_at IS NOT NULL
+            )
+        ) OR (
+            NEW.video_status = 'available'
+            AND (
+                NEW.video_path IS NULL OR NEW.video_created_at IS NULL
+                OR NEW.video_retention_until IS NULL
+                OR julianday(NEW.video_created_at) IS NULL
+                OR julianday(NEW.video_retention_until) IS NULL
+                OR julianday(NEW.video_retention_until)
+                   <= julianday(NEW.video_created_at)
+                OR NEW.video_deleted_at IS NOT NULL
+            )
+        ) OR (
+            NEW.video_status = 'expired'
+            AND (
+                NEW.video_path IS NULL OR NEW.video_created_at IS NULL
+                OR NEW.video_retention_until IS NULL
+                OR julianday(NEW.video_created_at) IS NULL
+                OR julianday(NEW.video_retention_until) IS NULL
+                OR julianday(NEW.video_retention_until)
+                   <= julianday(NEW.video_created_at)
+                OR NEW.video_deleted_at IS NOT NULL
+            )
+        ) OR (
+            NEW.video_status = 'deleted'
+            AND (
+                NEW.video_path IS NOT NULL OR NEW.video_deleted_at IS NULL
+                OR NEW.video_created_at IS NULL
+                OR NEW.video_retention_until IS NULL
+            )
+        ) OR (
+            NEW.camera_status <> 'not_started'
+            AND NEW.camera_status_changed_at IS NULL
+        )
+        BEGIN
+            SELECT RAISE(ABORT, 'invalid proctoring camera or recording metadata');
+        END;
+
+        CREATE TRIGGER trg_exam_proctoring_recording_metadata_update
+        BEFORE UPDATE ON exam_proctoring_sessions
+        WHEN (
+            NEW.recording_consent = 1 AND NEW.recording_consent_at IS NULL
+        ) OR (
+            NEW.recording_consent = 0 AND NEW.recording_consent_at IS NOT NULL
+        ) OR (
+            NEW.video_path IS NOT NULL
+            AND (
+                NEW.recording_consent <> 1
+                OR NEW.recording_consent_at IS NULL
+                OR NEW.video_status NOT IN ('available','expired')
+            )
+        ) OR (
+            NEW.video_status = 'not_recorded'
+            AND (
+                NEW.video_path IS NOT NULL OR NEW.video_created_at IS NOT NULL
+                OR NEW.video_retention_until IS NOT NULL
+                OR NEW.video_deleted_at IS NOT NULL
+            )
+        ) OR (
+            NEW.video_status = 'available'
+            AND (
+                NEW.video_path IS NULL OR NEW.video_created_at IS NULL
+                OR NEW.video_retention_until IS NULL
+                OR julianday(NEW.video_created_at) IS NULL
+                OR julianday(NEW.video_retention_until) IS NULL
+                OR julianday(NEW.video_retention_until)
+                   <= julianday(NEW.video_created_at)
+                OR NEW.video_deleted_at IS NOT NULL
+            )
+        ) OR (
+            NEW.video_status = 'expired'
+            AND (
+                NEW.video_path IS NULL OR NEW.video_created_at IS NULL
+                OR NEW.video_retention_until IS NULL
+                OR julianday(NEW.video_created_at) IS NULL
+                OR julianday(NEW.video_retention_until) IS NULL
+                OR julianday(NEW.video_retention_until)
+                   <= julianday(NEW.video_created_at)
+                OR NEW.video_deleted_at IS NOT NULL
+            )
+        ) OR (
+            NEW.video_status = 'deleted'
+            AND (
+                NEW.video_path IS NOT NULL OR NEW.video_deleted_at IS NULL
+                OR NEW.video_created_at IS NULL
+                OR NEW.video_retention_until IS NULL
+            )
+        ) OR (
+            NEW.camera_status <> OLD.camera_status
+            AND NEW.camera_status_changed_at IS NULL
+        )
+        BEGIN
+            SELECT RAISE(ABORT, 'invalid proctoring camera or recording metadata');
+        END;
+
+        DROP TRIGGER IF EXISTS trg_exam_proctoring_video_status_transition;
+        CREATE TRIGGER trg_exam_proctoring_video_status_transition
+        BEFORE UPDATE OF video_status ON exam_proctoring_sessions
+        WHEN NEW.video_status <> OLD.video_status
+         AND NOT (
+            (OLD.video_status = 'not_recorded' AND NEW.video_status = 'available')
+            OR (OLD.video_status = 'available'
+                AND NEW.video_status IN ('expired','deleted'))
+            OR (OLD.video_status = 'expired' AND NEW.video_status = 'deleted')
+         )
+        BEGIN
+            SELECT RAISE(ABORT, 'invalid proctoring video status transition');
+        END;
+
+        DROP TRIGGER IF EXISTS trg_exam_proctoring_video_deleted_immutable;
+        CREATE TRIGGER trg_exam_proctoring_video_deleted_immutable
+        BEFORE UPDATE OF video_path, video_created_at, video_retention_until,
+                         video_deleted_at
+        ON exam_proctoring_sessions
+        WHEN OLD.video_status = 'deleted'
+         AND (
+            NEW.video_path IS NOT OLD.video_path
+            OR NEW.video_created_at IS NOT OLD.video_created_at
+            OR NEW.video_retention_until IS NOT OLD.video_retention_until
+            OR NEW.video_deleted_at IS NOT OLD.video_deleted_at
+         )
+        BEGIN
+            SELECT RAISE(ABORT, 'deleted proctoring recordings are immutable');
+        END;
+        """
+    )
+    conn.commit()
+    logger.info("MIG-010: camera and recording metadata are ready.")
 
 
 # ── Tiện ích ──────────────────────────────────────────────────────────────────

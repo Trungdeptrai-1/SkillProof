@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from contextlib import contextmanager
-from datetime import datetime
+from dataclasses import asdict
+from datetime import datetime, timedelta
 import json
 import math
 import sqlite3
@@ -16,11 +17,14 @@ from server.database.connection import db
 from server.models.certificate_model import CertificateModel
 from server.models.recruitment_models import (
     ExamAnswerGradingModel,
+    ExamGradeRevisionModel,
+    ExamProctoringPolicyModel,
     ExamProctoringSessionModel,
     ExamSessionEventModel,
     InterviewEvaluationModel,
     InterviewModel,
     InterviewParticipantModel,
+    ProctoringVideoModel,
 )
 
 
@@ -169,6 +173,116 @@ class RecruitmentRepository:
                 (company_id, reviewer_id),
             ).fetchone() is not None
         return False
+
+    @classmethod
+    def _can_access_proctoring(
+        cls,
+        conn: sqlite3.Connection,
+        session_id: int,
+        actor_id: int,
+        *,
+        allow_experts: bool = True,
+    ) -> bool:
+        context = conn.execute(
+            """
+            SELECT es.candidate_id, es.company_id, ep.created_by
+            FROM exam_proctoring_sessions AS ps
+            JOIN exam_sessions AS es ON es.id = ps.exam_session_id
+            JOIN exam_papers AS ep ON ep.id = es.exam_paper_id
+            WHERE es.id = ?
+            """,
+            (session_id,),
+        ).fetchone()
+        actor = conn.execute(
+            """
+            SELECT role FROM users
+            WHERE id = ? AND is_active = 1 AND COALESCE(is_deleted, 0) = 0
+            """,
+            (actor_id,),
+        ).fetchone()
+        if context is None or actor is None:
+            return False
+        if actor["role"] == "admin":
+            return True
+        if actor["role"] == "candidate":
+            return actor_id == context["candidate_id"]
+        if (
+            actor["role"] == "company"
+            and context["company_id"] == actor_id
+            and context["created_by"] == actor_id
+        ):
+            return True
+        return (
+            allow_experts
+            and actor["role"] == "expert"
+            and context["company_id"] is not None
+            and cls._reviewer_has_company_access(
+                conn, context["company_id"], actor_id
+            )
+        )
+
+    @staticmethod
+    def _can_manage_proctoring_recording(
+        conn: sqlite3.Connection, session_id: int, actor_id: int
+    ) -> bool:
+        row = conn.execute(
+            """
+            SELECT es.company_id, ep.created_by, actor.role
+            FROM exam_proctoring_sessions AS ps
+            JOIN exam_sessions AS es ON es.id = ps.exam_session_id
+            JOIN exam_papers AS ep ON ep.id = es.exam_paper_id
+            JOIN users AS actor
+              ON actor.id = ? AND actor.is_active = 1
+             AND COALESCE(actor.is_deleted, 0) = 0
+            WHERE es.id = ?
+            """,
+            (actor_id, session_id),
+        ).fetchone()
+        if row is None:
+            return False
+        return row["role"] == "admin" or (
+            row["role"] == "company"
+            and row["company_id"] == actor_id
+            and row["created_by"] == actor_id
+        )
+
+    @staticmethod
+    def _validate_proctoring_policy(
+        policy: ExamProctoringPolicyModel,
+    ) -> ExamProctoringPolicyModel:
+        numeric_values = (
+            policy.warning_threshold,
+            policy.termination_threshold,
+            policy.camera_disconnect_timeout_seconds,
+            policy.video_retention_days,
+        )
+        if any(
+            isinstance(value, bool) or not isinstance(value, int) or value < 1
+            for value in numeric_values
+        ):
+            raise sqlite3.IntegrityError("Proctoring policy thresholds are invalid.")
+        if policy.termination_threshold < policy.warning_threshold:
+            raise sqlite3.IntegrityError(
+                "Termination threshold cannot be below warning threshold."
+            )
+        if not isinstance(policy.terminate_exam_on_threshold, bool):
+            raise sqlite3.IntegrityError(
+                "Proctoring termination policy must be boolean."
+            )
+        return policy
+
+    @classmethod
+    def _decode_proctoring_policy(cls, value: str) -> ExamProctoringPolicyModel:
+        try:
+            raw = json.loads(value)
+            if not isinstance(raw, dict):
+                raise ValueError
+            policy = ExamProctoringPolicyModel(**raw)
+        except (json.JSONDecodeError, TypeError, ValueError) as exc:
+            raise sqlite3.IntegrityError(
+                "Stored proctoring policy is invalid."
+            ) from exc
+        return cls._validate_proctoring_policy(policy)
 
     # RecruitmentModel contract
     def create_job_posting(
@@ -578,6 +692,42 @@ class RecruitmentRepository:
         if any(not isinstance(case, Mapping) for case in test_cases):
             raise sqlite3.IntegrityError("Stored coding test cases are invalid.")
         return [dict(case) for case in test_cases]
+
+    def list_public_coding_test_cases(
+        self, session_id: int, candidate_id: int, question_id: int
+    ) -> list[Record] | None:
+        question = self._one(
+            """
+            SELECT qb.test_cases
+            FROM exam_sessions AS es
+            JOIN exam_paper_questions AS epq
+              ON epq.exam_paper_id = es.exam_paper_id
+            JOIN question_bank AS qb ON qb.id = epq.question_id
+            WHERE es.id = ? AND es.candidate_id = ?
+              AND es.status = 'in_progress'
+              AND epq.question_id = ? AND qb.question_type = 'coding'
+            """,
+            (session_id, candidate_id, question_id),
+        )
+        if question is None:
+            return None
+        raw_test_cases = question["test_cases"]
+        if not isinstance(raw_test_cases, str):
+            return []
+        try:
+            parsed = json.loads(raw_test_cases)
+        except json.JSONDecodeError as exc:
+            raise sqlite3.IntegrityError(
+                "Stored coding test cases are invalid."
+            ) from exc
+        if not isinstance(parsed, list):
+            raise sqlite3.IntegrityError("Stored coding test cases are invalid.")
+        cases = self._normalize_coding_test_cases(parsed)
+        return [
+            {"input": case["input"], "expected_output": case["expected_output"]}
+            for case in cases
+            if not case["is_hidden"]
+        ]
 
     def get_user_role(self, user_id: int) -> str | None:
         row = self._one("SELECT role FROM users WHERE id = ?", (user_id,))
@@ -1763,6 +1913,39 @@ class RecruitmentRepository:
             ).fetchone()
             return ExamAnswerGradingModel.from_row(row)
 
+    def list_exam_grade_revisions(
+        self,
+        company_id: int,
+        requester_id: int,
+        session_id: int,
+        *,
+        question_id: int | None = None,
+    ) -> list[ExamGradeRevisionModel]:
+        if question_id is not None and (
+            isinstance(question_id, bool) or not isinstance(question_id, int)
+        ):
+            raise sqlite3.IntegrityError("Question id is invalid.")
+        query = """
+            SELECT egr.*
+            FROM exam_grade_revisions AS egr
+            JOIN exam_answers AS ea ON ea.id = egr.exam_answer_id
+            JOIN exam_sessions AS es ON es.id = ea.exam_session_id
+            JOIN exam_papers AS ep ON ep.id = es.exam_paper_id
+            WHERE es.id = ? AND es.company_id = ? AND ep.created_by = ?
+        """
+        params: tuple[object, ...] = (session_id, company_id, company_id)
+        if question_id is not None:
+            query += " AND ea.question_id = ?"
+            params += (question_id,)
+        query += " ORDER BY egr.created_at, egr.id"
+        with _DATABASE_LOCK:
+            if not self._reviewer_has_company_access(
+                self._connection, company_id, requester_id
+            ):
+                return []
+            rows = self._connection.execute(query, params).fetchall()
+            return [ExamGradeRevisionModel.from_row(row) for row in rows]
+
     def complete_session_once(
         self,
         session_id: int,
@@ -2025,15 +2208,198 @@ class RecruitmentRepository:
             (session_id, candidate_id),
         )
 
+    def get_exam_proctoring_policy(self) -> ExamProctoringPolicyModel:
+        row = self._one(
+            "SELECT value FROM app_settings WHERE key = ?",
+            ("exam_proctoring.policy.v1",),
+        )
+        if row is None:
+            return ExamProctoringPolicyModel()
+        value = row.get("value")
+        if not isinstance(value, str):
+            raise sqlite3.IntegrityError("Stored proctoring policy is invalid.")
+        return self._decode_proctoring_policy(value)
+
+    def save_exam_proctoring_policy(
+        self,
+        admin_id: int,
+        policy: ExamProctoringPolicyModel | Mapping[str, object],
+    ) -> ExamProctoringPolicyModel | None:
+        if isinstance(policy, Mapping):
+            try:
+                policy = ExamProctoringPolicyModel(**policy)
+            except TypeError as exc:
+                raise sqlite3.IntegrityError(
+                    "Proctoring policy fields are invalid."
+                ) from exc
+        if not isinstance(policy, ExamProctoringPolicyModel):
+            raise sqlite3.IntegrityError("Proctoring policy is invalid.")
+        policy = self._validate_proctoring_policy(policy)
+        with self._transaction() as conn:
+            admin = conn.execute(
+                """
+                SELECT 1 FROM users
+                WHERE id = ? AND role = 'admin' AND is_active = 1
+                  AND COALESCE(is_deleted, 0) = 0
+                """,
+                (admin_id,),
+            ).fetchone()
+            if admin is None:
+                return None
+            conn.execute(
+                """
+                INSERT INTO app_settings (key, value)
+                VALUES (?, ?)
+                ON CONFLICT(key) DO UPDATE SET
+                    value = excluded.value,
+                    updated_at = datetime('now','localtime')
+                """,
+                (
+                    "exam_proctoring.policy.v1",
+                    json.dumps(asdict(policy), sort_keys=True, separators=(",", ":")),
+                ),
+            )
+            return policy
+
+    def set_exam_recording_consent(
+        self, session_id: int, candidate_id: int, *, consented: bool
+    ) -> ExamProctoringSessionModel | None:
+        if not isinstance(consented, bool):
+            raise sqlite3.IntegrityError("Recording consent must be boolean.")
+        now = datetime.now().astimezone().isoformat(timespec="seconds")
+        with self._transaction() as conn:
+            session = conn.execute(
+                """
+                SELECT * FROM exam_proctoring_sessions
+                WHERE exam_session_id = ? AND candidate_id = ? AND status = 'active'
+                """,
+                (session_id, candidate_id),
+            ).fetchone()
+            if session is None:
+                return None
+            if bool(session["recording_consent"]) == consented:
+                return ExamProctoringSessionModel.from_row(session)
+            if session["video_status"] != "not_recorded":
+                raise sqlite3.IntegrityError(
+                    "Recording consent cannot change after recording metadata exists."
+                )
+            conn.execute(
+                """
+                UPDATE exam_proctoring_sessions
+                SET recording_consent = ?, recording_consent_at = ?
+                WHERE id = ?
+                """,
+                (int(consented), now if consented else None, session["id"]),
+            )
+            conn.execute(
+                """
+                INSERT INTO exam_session_events
+                    (exam_session_id, candidate_id, proctoring_session_id,
+                     event_type, is_violation, details_json, occurred_at,
+                     consent_for_evidence)
+                VALUES (?, ?, ?, ?, 0, ?, ?, ?)
+                """,
+                (
+                    session_id,
+                    candidate_id,
+                    session["id"],
+                    "recording_consent_granted"
+                    if consented
+                    else "recording_consent_withdrawn",
+                    json.dumps(
+                        {"recording_consent": consented},
+                        separators=(",", ":"),
+                    ),
+                    now,
+                    int(bool(session["consent_for_evidence"])),
+                ),
+            )
+            row = conn.execute(
+                "SELECT * FROM exam_proctoring_sessions WHERE id = ?",
+                (session["id"],),
+            ).fetchone()
+            return ExamProctoringSessionModel.from_row(row)
+
+    def update_exam_camera_status(
+        self, session_id: int, candidate_id: int, *, camera_status: str
+    ) -> ExamProctoringSessionModel | None:
+        statuses = {
+            "active",
+            "disconnected",
+            "permission_denied",
+            "off",
+            "not_started",
+        }
+        if not isinstance(camera_status, str) or camera_status not in statuses:
+            raise sqlite3.IntegrityError("Unsupported camera status.")
+        now = datetime.now().astimezone().isoformat(timespec="seconds")
+        event_types = {
+            "active": "camera_connected",
+            "disconnected": "camera_disconnected",
+            "permission_denied": "camera_permission_denied",
+            "off": "camera_off",
+            "not_started": "camera_not_started",
+        }
+        with self._transaction() as conn:
+            session = conn.execute(
+                """
+                SELECT * FROM exam_proctoring_sessions
+                WHERE exam_session_id = ? AND candidate_id = ? AND status = 'active'
+                """,
+                (session_id, candidate_id),
+            ).fetchone()
+            if session is None:
+                return None
+            if session["camera_status"] == camera_status:
+                return ExamProctoringSessionModel.from_row(session)
+            conn.execute(
+                """
+                UPDATE exam_proctoring_sessions
+                SET camera_status = ?, camera_status_changed_at = ?
+                WHERE id = ?
+                """,
+                (camera_status, now, session["id"]),
+            )
+            conn.execute(
+                """
+                INSERT INTO exam_session_events
+                    (exam_session_id, candidate_id, proctoring_session_id,
+                     event_type, is_violation, details_json, occurred_at,
+                     consent_for_evidence)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    session_id,
+                    candidate_id,
+                    session["id"],
+                    event_types[camera_status],
+                    int(camera_status == "disconnected"),
+                    json.dumps(
+                        {"camera_status": camera_status},
+                        separators=(",", ":"),
+                    ),
+                    now,
+                    int(bool(session["consent_for_evidence"])),
+                ),
+            )
+            row = conn.execute(
+                "SELECT * FROM exam_proctoring_sessions WHERE id = ?",
+                (session["id"],),
+            ).fetchone()
+            return ExamProctoringSessionModel.from_row(row)
+
     def start_exam_proctoring_session(
         self,
         session_id: int,
         candidate_id: int,
         *,
         consent_for_evidence: bool = False,
+        recording_consent: bool = False,
     ) -> ExamProctoringSessionModel | None:
         if not isinstance(consent_for_evidence, bool):
             raise sqlite3.IntegrityError("Evidence consent must be boolean.")
+        if not isinstance(recording_consent, bool):
+            raise sqlite3.IntegrityError("Recording consent must be boolean.")
         with self._transaction() as conn:
             exam = conn.execute(
                 """
@@ -2056,10 +2422,21 @@ class RecruitmentRepository:
             cursor = conn.execute(
                 """
                 INSERT INTO exam_proctoring_sessions
-                    (exam_session_id, candidate_id, consent_for_evidence)
-                VALUES (?, ?, ?)
+                    (exam_session_id, candidate_id, consent_for_evidence,
+                     recording_consent, recording_consent_at)
+                VALUES (?, ?, ?, ?, ?)
                 """,
-                (session_id, candidate_id, int(consent_for_evidence)),
+                (
+                    session_id,
+                    candidate_id,
+                    int(consent_for_evidence),
+                    int(recording_consent),
+                    (
+                        datetime.now().astimezone().isoformat(timespec="seconds")
+                        if recording_consent
+                        else None
+                    ),
+                ),
             )
             row = conn.execute(
                 "SELECT * FROM exam_proctoring_sessions WHERE id = ?",
@@ -2112,6 +2489,258 @@ class RecruitmentRepository:
             ).fetchone()
             return (
                 ExamProctoringSessionModel.from_row(row) if row is not None else None
+            )
+
+    def list_proctoring_violation_history(
+        self,
+        session_id: int,
+        viewer_id: int,
+        *,
+        processing_status: str | None = None,
+    ) -> list[ExamSessionEventModel]:
+        if processing_status not in {
+            None, "pending", "reviewed", "dismissed", "escalated"
+        }:
+            raise sqlite3.IntegrityError("Unsupported event processing status.")
+        with _DATABASE_LOCK:
+            if not self._can_access_proctoring(
+                self._connection, session_id, viewer_id
+            ):
+                return []
+            rows = self._connection.execute(
+                """
+                SELECT * FROM exam_session_events
+                WHERE exam_session_id = ? AND is_violation = 1
+                  AND (? IS NULL OR processing_status = ?)
+                ORDER BY julianday(occurred_at), id
+                """,
+                (session_id, processing_status, processing_status),
+            ).fetchall()
+            return [ExamSessionEventModel.from_row(row) for row in rows]
+
+    def attach_proctoring_video(
+        self,
+        session_id: int,
+        actor_id: int,
+        video_path: str,
+        *,
+        created_at: str | None = None,
+        retention_days: int | None = None,
+    ) -> ProctoringVideoModel | None:
+        if (
+            not isinstance(video_path, str)
+            or not video_path.strip()
+            or video_path.strip().lower().startswith("data:")
+        ):
+            raise sqlite3.IntegrityError(
+                "Video must be stored externally as a path or URI."
+            )
+        video_path = video_path.strip()
+        if created_at is None:
+            created = datetime.now().astimezone()
+        else:
+            if not isinstance(created_at, str):
+                raise sqlite3.IntegrityError("Video creation time is invalid.")
+            try:
+                created = datetime.fromisoformat(created_at)
+            except ValueError as exc:
+                raise sqlite3.IntegrityError(
+                    "Video creation time is invalid."
+                ) from exc
+        if retention_days is not None and (
+            isinstance(retention_days, bool)
+            or not isinstance(retention_days, int)
+            or retention_days < 1
+        ):
+            raise sqlite3.IntegrityError("Video retention period is invalid.")
+
+        with self._transaction() as conn:
+            if not self._can_manage_proctoring_recording(
+                conn, session_id, actor_id
+            ):
+                return None
+            session = conn.execute(
+                """
+                SELECT * FROM exam_proctoring_sessions
+                WHERE exam_session_id = ?
+                """,
+                (session_id,),
+            ).fetchone()
+            if session is None:
+                return None
+            if not session["recording_consent"] or not session[
+                "recording_consent_at"
+            ]:
+                raise sqlite3.IntegrityError(
+                    "Recording cannot be attached without explicit consent."
+                )
+            if session["video_status"] != "not_recorded":
+                raise sqlite3.IntegrityError(
+                    "A recording already exists for this exam session."
+                )
+            if retention_days is None:
+                setting = conn.execute(
+                    "SELECT value FROM app_settings WHERE key = ?",
+                    ("exam_proctoring.policy.v1",),
+                ).fetchone()
+                policy = (
+                    self._decode_proctoring_policy(setting["value"])
+                    if setting is not None
+                    else ExamProctoringPolicyModel()
+                )
+                retention_days = policy.video_retention_days
+            retention_until = created + timedelta(days=retention_days)
+            created_value = created.isoformat(timespec="seconds")
+            retention_value = retention_until.isoformat(timespec="seconds")
+            conn.execute(
+                """
+                UPDATE exam_proctoring_sessions
+                SET video_path = ?, video_created_at = ?,
+                    video_retention_until = ?, video_status = 'available'
+                WHERE id = ?
+                """,
+                (video_path, created_value, retention_value, session["id"]),
+            )
+            return ProctoringVideoModel(
+                exam_session_id=session_id,
+                candidate_id=session["candidate_id"],
+                video_path=video_path,
+                video_created_at=created_value,
+                video_retention_until=retention_value,
+                video_deleted_at=None,
+                video_status="available",
+            )
+
+    def get_proctoring_video_for_session(
+        self, session_id: int, viewer_id: int
+    ) -> ProctoringVideoModel | None:
+        with self._transaction() as conn:
+            if not self._can_access_proctoring(conn, session_id, viewer_id):
+                return None
+            session = conn.execute(
+                """
+                SELECT ps.* FROM exam_proctoring_sessions AS ps
+                WHERE ps.exam_session_id = ?
+                """,
+                (session_id,),
+            ).fetchone()
+            if session is None:
+                return None
+            status = session["video_status"]
+            if status == "available" and self._is_expired(
+                session["video_retention_until"]
+            ):
+                conn.execute(
+                    """
+                    UPDATE exam_proctoring_sessions SET video_status = 'expired'
+                    WHERE id = ? AND video_status = 'available'
+                    """,
+                    (session["id"],),
+                )
+                status = "expired"
+            return ProctoringVideoModel(
+                exam_session_id=session_id,
+                candidate_id=session["candidate_id"],
+                video_path=session["video_path"] if status == "available" else None,
+                video_created_at=session["video_created_at"],
+                video_retention_until=session["video_retention_until"],
+                video_deleted_at=session["video_deleted_at"],
+                video_status=status,
+            )
+
+    def list_expired_proctoring_videos(
+        self, admin_id: int
+    ) -> list[ProctoringVideoModel]:
+        with self._transaction() as conn:
+            admin = conn.execute(
+                """
+                SELECT 1 FROM users
+                WHERE id = ? AND role = 'admin' AND is_active = 1
+                  AND COALESCE(is_deleted, 0) = 0
+                """,
+                (admin_id,),
+            ).fetchone()
+            if admin is None:
+                return []
+            candidates = conn.execute(
+                """
+                SELECT * FROM exam_proctoring_sessions
+                WHERE video_status = 'available'
+                """
+            ).fetchall()
+            for session in candidates:
+                if self._is_expired(session["video_retention_until"]):
+                    conn.execute(
+                        """
+                        UPDATE exam_proctoring_sessions
+                        SET video_status = 'expired'
+                        WHERE id = ? AND video_status = 'available'
+                        """,
+                        (session["id"],),
+                    )
+            rows = conn.execute(
+                """
+                SELECT exam_session_id, candidate_id, video_path,
+                       video_created_at, video_retention_until,
+                       video_deleted_at, video_status
+                FROM exam_proctoring_sessions
+                WHERE video_status = 'expired'
+                ORDER BY video_retention_until, exam_session_id
+                """
+            ).fetchall()
+            return [
+                ProctoringVideoModel(
+                    exam_session_id=row["exam_session_id"],
+                    candidate_id=row["candidate_id"],
+                    video_path=row["video_path"],
+                    video_created_at=row["video_created_at"],
+                    video_retention_until=row["video_retention_until"],
+                    video_deleted_at=row["video_deleted_at"],
+                    video_status=row["video_status"],
+                )
+                for row in rows
+            ]
+
+    def record_proctoring_video_deleted(
+        self, session_id: int, actor_id: int
+    ) -> ProctoringVideoModel | None:
+        now = datetime.now().astimezone().isoformat(timespec="seconds")
+        with self._transaction() as conn:
+            if not self._can_manage_proctoring_recording(
+                conn, session_id, actor_id
+            ):
+                return None
+            session = conn.execute(
+                """
+                SELECT * FROM exam_proctoring_sessions
+                WHERE exam_session_id = ?
+                """,
+                (session_id,),
+            ).fetchone()
+            if session is None or session["video_status"] == "not_recorded":
+                return None
+            if session["video_status"] != "deleted":
+                conn.execute(
+                    """
+                    UPDATE exam_proctoring_sessions
+                    SET video_path = NULL, video_status = 'deleted',
+                        video_deleted_at = ?
+                    WHERE id = ? AND video_status IN ('available','expired')
+                    """,
+                    (now, session["id"]),
+                )
+                session = conn.execute(
+                    "SELECT * FROM exam_proctoring_sessions WHERE id = ?",
+                    (session["id"],),
+                ).fetchone()
+            return ProctoringVideoModel(
+                exam_session_id=session_id,
+                candidate_id=session["candidate_id"],
+                video_path=None,
+                video_created_at=session["video_created_at"],
+                video_retention_until=session["video_retention_until"],
+                video_deleted_at=session["video_deleted_at"],
+                video_status=session["video_status"],
             )
 
     def finish_exam_proctoring_session(
