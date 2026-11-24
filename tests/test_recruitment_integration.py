@@ -55,6 +55,22 @@ def test_recruitment_exam_flow_uses_sqlite_and_releases_candidate_result(
     other_email, other_password = _create_user(
         fresh_db, "other-candidate", "candidate"
     )
+    _create_user(fresh_db, "recruitment-expert", "expert")
+    company_id = fresh_db.fetchone(
+        "SELECT id FROM users WHERE email = ?", (company_email,)
+    )["id"]
+    expert_id = fresh_db.fetchone(
+        "SELECT id FROM users WHERE email = ?",
+        ("recruitment-expert@recruitment.example.test",),
+    )["id"]
+    fresh_db.execute(
+        """
+        INSERT INTO company_expert_contracts
+            (company_id, expert_id, contract_code, status)
+        VALUES (?, ?, 'RECRUITMENT-EXPERT-001', 'active')
+        """,
+        (company_id, expert_id),
+    )
     company, candidate, exam_controller = _controllers()
 
     assert auth.login(company_email, company_password).success
@@ -68,6 +84,9 @@ def test_recruitment_exam_flow_uses_sqlite_and_releases_candidate_result(
     assert position.success
     position_id = company.list_positions().items[0].id
 
+    authors = company.list_contracted_experts()
+    assert authors.success
+    assert [author.id for author in authors.items] == [expert_id]
     assessment = company.create_assessment(
         "Python Basics",
         "Multiple-choice assessment",
@@ -79,8 +98,12 @@ def test_recruitment_exam_flow_uses_sqlite_and_releases_candidate_result(
                 1,
             ),
         ),
+        expert_id=authors.items[0].id,
     )
     assert assessment.success
+    assert fresh_db.fetchone(
+        "SELECT expert_id FROM question_bank"
+    )["expert_id"] == expert_id
     exam_id = company.list_assessments().items[0].id
 
     candidates = company.list_candidates("recruitment-candidate")

@@ -9,7 +9,7 @@ Candidate, and exam workflows. It reuses the existing exam/question tables.
 |---|---|---|
 | `job_postings` *(MIG-006)* | Company vacancy | `company_id -> users.id`; title, description, requirements, location, status |
 | `exam_papers` *(existing)* | Reusable exam/test | Published paper selected for an invitation |
-| `question_bank` *(existing)* | Question source | Existing `reference_answer` and `test_cases` are confidential grading data |
+| `question_bank` *(existing)* | Question source | `expert_id` is the author; `reference_answer` and `test_cases` are confidential grading data |
 | `question_options` *(existing)* | Multiple-choice options | Existing `is_correct` is confidential grading data |
 | `exam_paper_questions` *(existing)* | Questions in a paper | Reuses the existing question and score/order relationship |
 | `recruitment_invitations` *(MIG-006)* | Candidate invitation | Company, job, candidate, paper, response, and linked exam-session context |
@@ -39,6 +39,12 @@ MIG-006 also checks that a job owner has the `company` role, an invited user has
 the `candidate` role, and the job and paper are published when an invitation is
 created. Job ownership and invitation/submission identity fields are immutable
 after creation (the invitation's exam session can be linked once on acceptance).
+
+`question_bank.expert_id` remains the author and must not be filled with the
+Company's id. The Company workflow lists only Experts with an active contract;
+the user selects the question author, and `ExamService.add_question()` passes
+that explicit id to persistence. The repository verifies the contract again
+when saving, so a stale or unrelated selection is rejected.
 
 ## Lifecycle and status values
 
@@ -100,9 +106,31 @@ Import the shared DTOs from `server.models`:
 - `ExamQuestionModel`, `QuestionOptionModel`
 - `RecruitmentInvitationModel`, `ExamSessionModel`, `ExamAnswerModel`
 - `RecruitmentSubmissionModel`, `CandidateExamResultModel`
+- `RecruitmentRepository` implements both Service persistence protocols.
 
 Models are immutable row DTOs; they do not execute SQL or replace authorization
 in Services. Use the existing SQLite connection and schema migration path.
+
+To reconcile question authorship, the proposed `ExamModel.add_question`
+signature is:
+
+```python
+def add_question(
+    self,
+    company_id: int,
+    exam_id: int,
+    *,
+    expert_id: int,
+    title: str,
+    content: str,
+    difficulty: str,
+    points: float,
+    options: Sequence[ExamOption],
+) -> Mapping[str, object] | None: ...
+```
+
+The Service/UI must choose an actual active contracted Expert (or support
+selecting an existing Expert-authored question) before calling this method.
 
 ## Migration compatibility
 
@@ -125,6 +153,7 @@ connected to the Views through the application adapters in
 |---|---|---|
 | List/create/update positions | `RecruitmentController.list_positions`, `create_position`, `update_position` | `job_postings` |
 | Find candidates | `RecruitmentController.list_candidates` | Active, non-deleted Candidate `users` rows; only id, name, email are returned |
+| List contracted question authors | `ExamController.list_contracted_experts` | Active `company_expert_contracts` and Expert `users` rows |
 | List/create exams and invite candidates | `ExamController.list_exams`, `create_exam`, `add_question`, `publish_exam`, `invite_candidate` | `exam_papers`, `question_bank`, `question_options`, `exam_paper_questions`, `recruitment_invitations` |
 | Candidate invitations and attempts | `ExamController.list_invitations`, `accept_invitation`, `start_exam`, `list_questions`, `save_answer`, `submit_exam` | `recruitment_invitations`, `exam_sessions`, `exam_answers` |
 | Company results and publication | `ExamController.list_submissions`, `release_results` | `recruitment_submissions`, `exam_sessions` |

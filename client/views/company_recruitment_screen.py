@@ -37,6 +37,7 @@ from client.views.recruitment_contracts import (
     CompanyRecruitmentController,
     Position,
     QuestionDraft,
+    QuestionAuthor,
 )
 
 
@@ -56,6 +57,7 @@ class CompanyRecruitmentScreen(QWidget):
         self._assessments: tuple[Assessment, ...] = ()
         self._candidates: tuple[Candidate, ...] = ()
         self._results: tuple[AssessmentResultRow, ...] = ()
+        self._question_authors: tuple[QuestionAuthor, ...] = ()
         self._question_drafts: list[QuestionDraft] = []
         self._editing_position_id: int | None = None
         self._setup_ui()
@@ -190,6 +192,10 @@ class CompanyRecruitmentScreen(QWidget):
         form.addRow("Tên bài thi *", self._assessment_title)
         form.addRow("Mô tả", self._assessment_description)
         form.addRow("Thời lượng (phút)", self._assessment_duration)
+        self._question_author = QComboBox()
+        self._question_author_status = StatusBanner(tab)
+        form.addRow("Expert soạn câu hỏi *", self._question_author)
+        form.addRow(self._question_author_status)
         layout.addLayout(form)
 
         question_group = QVBoxLayout()
@@ -232,6 +238,10 @@ class CompanyRecruitmentScreen(QWidget):
         self._assessment_create = QPushButton("Tạo bài thi")
         self._assessment_create.setStyleSheet(
             primary_button_style(font_size=12, padding="8px 14px")
+        )
+        self._assessment_create.setEnabled(False)
+        self._question_author.currentIndexChanged.connect(
+            self._question_author_changed
         )
         self._assessment_create.clicked.connect(self._create_assessment)
         actions.addWidget(self._assessment_refresh)
@@ -335,6 +345,8 @@ class CompanyRecruitmentScreen(QWidget):
             self._assessment_title,
             self._assessment_description,
             self._assessment_duration,
+            self._question_author,
+            self._question_author_status,
             self._question_prompt,
             *self._question_options,
             self._correct_option,
@@ -365,6 +377,7 @@ class CompanyRecruitmentScreen(QWidget):
             for message in (
                 self._load_positions(),
                 self._load_assessments(),
+                self._load_contracted_experts(),
                 self._load_candidates(),
                 self._load_results(),
             )
@@ -417,6 +430,40 @@ class CompanyRecruitmentScreen(QWidget):
             "empty" if not self._assessments else "success",
         )
         return ""
+
+    def _load_contracted_experts(self) -> str:
+        result = self._controller.list_contracted_experts()
+        if not result.success:
+            self._question_authors = ()
+            self._fill_combo(self._question_author, ())
+            message = result.message or "Không thể tải chuyên gia đã ký hợp đồng."
+            self._question_author_status.set_status(message, "error")
+            self._question_author_changed()
+            return message
+        self._question_authors = result.items
+        self._fill_combo(
+            self._question_author,
+            (
+                (f"{expert.full_name} ({expert.email})", expert.id)
+                for expert in self._question_authors
+            ),
+        )
+        self._question_author_status.set_status(
+            "Chưa có Expert với hợp đồng đang hoạt động."
+            if not self._question_authors
+            else f"Đã tải {len(self._question_authors)} Expert có hợp đồng.",
+            "empty" if not self._question_authors else "success",
+        )
+        self._question_author_changed()
+        return ""
+
+    def _question_author_changed(self, *_: object) -> None:
+        expert_id = self._question_author.currentData()
+        self._assessment_create.setEnabled(
+            self._controller is not None
+            and isinstance(expert_id, int)
+            and not isinstance(expert_id, bool)
+        )
 
     def _load_candidates(self) -> str:
         result = self._controller.list_candidates(self._candidate_search.text())
@@ -773,6 +820,13 @@ class CompanyRecruitmentScreen(QWidget):
     def _create_assessment(self) -> None:
         if self._controller is None:
             return
+        expert_id = self._question_author.currentData()
+        if not isinstance(expert_id, int) or isinstance(expert_id, bool):
+            self._status.set_status(
+                "Chọn Expert có hợp đồng đang hoạt động trước khi tạo bài thi.",
+                "error",
+            )
+            return
         title = self._assessment_title.text().strip()
         if not title:
             self._status.set_status("Tên bài thi không được để trống.", "error")
@@ -786,6 +840,7 @@ class CompanyRecruitmentScreen(QWidget):
             self._assessment_description.toPlainText().strip(),
             self._assessment_duration.value(),
             tuple(self._question_drafts),
+            expert_id=expert_id,
         )
         if not result.success:
             self._status.set_status(result.message or "Không thể tạo bài thi.", "error")

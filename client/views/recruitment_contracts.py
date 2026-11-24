@@ -55,6 +55,13 @@ class Candidate:
 
 
 @dataclass(frozen=True)
+class QuestionAuthor:
+    id: int
+    full_name: str
+    email: str
+
+
+@dataclass(frozen=True)
 class AssessmentResultRow:
     candidate_name: str
     position_title: str
@@ -157,12 +164,16 @@ class CompanyRecruitmentController(Protocol):
 
     def list_assessments(self) -> ListResult[Assessment]: ...
 
+    def list_contracted_experts(self) -> ListResult[QuestionAuthor]: ...
+
     def create_assessment(
         self,
         title: str,
         description: str,
         duration_minutes: int,
         questions: tuple[QuestionDraft, ...],
+        *,
+        expert_id: int,
     ) -> ActionResult: ...
 
     def list_candidates(self, search: str = "") -> ListResult[Candidate]: ...

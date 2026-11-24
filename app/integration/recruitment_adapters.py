@@ -20,6 +20,7 @@ from client.views.recruitment_contracts import (
     ListResult,
     Position,
     QuestionDraft,
+    QuestionAuthor,
     SubmitResult,
 )
 from server.controllers.exam_controller import ExamController
@@ -142,6 +143,8 @@ class CompanyRecruitmentAdapter:
         description: str,
         duration_minutes: int,
         questions: tuple[QuestionDraft, ...],
+        *,
+        expert_id: int,
     ) -> ActionResult:
         if not questions:
             return ActionResult(False, "Thêm ít nhất một câu hỏi trước khi lưu.")
@@ -169,6 +172,7 @@ class CompanyRecruitmentAdapter:
                 draft.prompt,
                 options,
                 points=10,
+                expert_id=expert_id,
             )
             if not added.success:
                 return ActionResult(
@@ -182,6 +186,23 @@ class CompanyRecruitmentAdapter:
                 f"Bài thi nháp #{exam_id} chưa được công bố: {published.message}",
             )
         return ActionResult(True, published.message)
+
+    def list_contracted_experts(self) -> ListResult[QuestionAuthor]:
+        result = self._exams.list_contracted_experts()
+        if not result.success:
+            return ListResult(False, message=result.message)
+        experts: list[QuestionAuthor] = []
+        for value in result.experts:
+            row = _record(value)
+            if row is None:
+                return ListResult(False, message="Dữ liệu chuyên gia không hợp lệ.")
+            expert_id = _integer(row.get("id"))
+            full_name = _text(row.get("full_name"))
+            email = _text(row.get("email"))
+            if expert_id is None or full_name is None or email is None:
+                return ListResult(False, message="Dữ liệu chuyên gia không đầy đủ.")
+            experts.append(QuestionAuthor(expert_id, full_name, email))
+        return ListResult(True, tuple(experts))
 
     def list_candidates(self, search: str = "") -> ListResult[Candidate]:
         result = self._recruitment.list_candidates(search)
@@ -226,8 +247,12 @@ class CompanyRecruitmentAdapter:
                 if row is None:
                     return ListResult(False, message="Dữ liệu kết quả không hợp lệ.")
                 candidate_name = _text(row.get("candidate_name"))
-                position_title = _text(row.get("position_title"))
-                assessment_title = _text(row.get("assessment_title"))
+                position_title = _text(row.get("position_title")) or _text(
+                    row.get("job_title")
+                )
+                assessment_title = _text(row.get("assessment_title")) or _text(
+                    row.get("exam_title")
+                )
                 status = _text(row.get("status"))
                 submitted_at = _text(row.get("submitted_at"))
                 invitation_id = _integer(row.get("invitation_id"))

@@ -22,6 +22,7 @@ from client.views.recruitment_contracts import (
     ListResult,
     Position,
     QuestionDraft,
+    QuestionAuthor,
     SubmitResult,
 )
 
@@ -45,6 +46,9 @@ class CompanyRecruitmentMock:
         ]
         self.assessments = [Assessment(5, "Python Basics", 30, 2)]
         self.candidates = [Candidate(8, "Candidate QA", "candidate@example.test")]
+        self.question_authors = [
+            QuestionAuthor(77, "Expert QA", "expert@example.test")
+        ]
         self.results = [
             AssessmentResultRow(
                 "Candidate QA",
@@ -86,11 +90,14 @@ class CompanyRecruitmentMock:
     def list_assessments(self):
         return ListResult(True, tuple(self.assessments))
 
+    def list_contracted_experts(self):
+        return ListResult(True, tuple(self.question_authors))
+
     def create_assessment(
-        self, title, description, duration_minutes, questions
+        self, title, description, duration_minutes, questions, *, expert_id
     ):
         self.created_assessments.append(
-            (title, description, duration_minutes, questions)
+            (title, description, duration_minutes, questions, expert_id)
         )
         return ActionResult(True)
 
@@ -238,6 +245,7 @@ def test_company_recruitment_views_validate_and_call_controller(qt_app):
             "",
             60,
             (QuestionDraft("Which type is immutable?", ("list", "tuple"), 1),),
+            77,
         )
     ]
 
@@ -280,6 +288,18 @@ def test_company_controller_errors_empty_and_unavailable_states(qt_app):
     assert "Assessment API unavailable" in screen._status.text()
     screen.deleteLater()
     unavailable.deleteLater()
+
+
+def test_company_cannot_create_exam_without_contracted_question_author(qt_app):
+    class NoContractedExperts(CompanyRecruitmentMock):
+        def list_contracted_experts(self):
+            return ListResult(True)
+
+    screen = CompanyRecruitmentScreen(NoContractedExperts())
+
+    assert not screen._assessment_create.isEnabled()
+    assert "Chưa có Expert" in screen._question_author_status.text()
+    screen.deleteLater()
 
 
 def test_candidate_saves_answers_confirms_and_prevents_duplicate_submission(

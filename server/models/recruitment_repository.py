@@ -1,56 +1,135 @@
-"""SQLite persistence for recruitment and multiple-choice exam workflows."""
+"""SQLite persistence for recruitment positions, exams, and submissions."""
 
 from __future__ import annotations
 
-import sqlite3
 from collections.abc import Mapping, Sequence
+from contextlib import contextmanager
+from datetime import datetime
+import math
+import sqlite3
+from threading import RLock
 from typing import Protocol
 
 from server.database.connection import db
 
 
-class ExamOptionLike(Protocol):
+Record = dict[str, object]
+QuestionScores = Sequence[Mapping[str, int | float]]
+_DATABASE_LOCK = RLock()
+
+
+class QuestionOptionInput(Protocol):
     content: str
     is_correct: bool
 
 
-Record = Mapping[str, object]
-
-
 class RecruitmentRepository:
-    """Implements the persistence contracts consumed by recruitment Services."""
+    """Implements the persistence contracts consumed by both recruitment services.
+
+    Production instances use the application's SQLite singleton. Tests may pass
+    a connection to an isolated temporary database.
+    """
+
+    def __init__(self, connection: sqlite3.Connection | None = None) -> None:
+        self._connection = connection if connection is not None else db.get_connection()
+        self._connection.row_factory = sqlite3.Row
+
+    @contextmanager
+    def _transaction(self):
+        with _DATABASE_LOCK:
+            conn = self._connection
+            nested = conn.in_transaction
+            savepoint = "recruitment_repository"
+            try:
+                if nested:
+                    conn.execute(f"SAVEPOINT {savepoint}")
+                else:
+                    conn.execute("BEGIN IMMEDIATE")
+                yield conn
+            except BaseException:
+                if nested:
+                    conn.execute(f"ROLLBACK TO SAVEPOINT {savepoint}")
+                    conn.execute(f"RELEASE SAVEPOINT {savepoint}")
+                else:
+                    conn.rollback()
+                raise
+            else:
+                if nested:
+                    conn.execute(f"RELEASE SAVEPOINT {savepoint}")
+                else:
+                    conn.commit()
 
     @staticmethod
-    def _record(row: sqlite3.Row | None) -> dict[str, object] | None:
+    def _as_record(row: sqlite3.Row | None) -> Record | None:
         return dict(row) if row is not None else None
 
-    @staticmethod
-    def _exam_query() -> str:
-        return """
-            SELECT ep.*,
-                   COUNT(epq.question_id) AS question_count
-            FROM exam_papers ep
-            LEFT JOIN exam_paper_questions epq ON epq.exam_paper_id = ep.id
-        """
+    def _one(self, sql: str, params: tuple[object, ...] = ()) -> Record | None:
+        with _DATABASE_LOCK:
+            return self._as_record(self._connection.execute(sql, params).fetchone())
+
+    def _many(self, sql: str, params: tuple[object, ...] = ()) -> list[Record]:
+        with _DATABASE_LOCK:
+            return [
+                dict(row)
+                for row in self._connection.execute(sql, params).fetchall()
+            ]
 
     @staticmethod
-    def _invitation_query() -> str:
-        return """
-            SELECT ri.*,
-                   COALESCE(cp.company_name, company.full_name) AS company_name,
-                   jp.title AS position_title,
-                   ep.title AS exam_title,
-                   ep.duration_min,
-                   es.status AS session_status,
-                   es.scheduled_at
-            FROM recruitment_invitations ri
-            JOIN users company ON company.id = ri.company_id
-            LEFT JOIN company_profiles cp ON cp.user_id = ri.company_id
-            JOIN job_postings jp ON jp.id = ri.job_posting_id
-            JOIN exam_papers ep ON ep.id = ri.exam_paper_id
-            LEFT JOIN exam_sessions es ON es.id = ri.exam_session_id
-        """
+    def _is_expired(value: object) -> bool:
+        if value is None or value == "":
+            return False
+        if not isinstance(value, str):
+            raise sqlite3.IntegrityError("Invalid invitation expiration value.")
+        try:
+            expiration = datetime.fromisoformat(value)
+        except ValueError as exc:
+            raise sqlite3.IntegrityError(
+                "Invalid invitation expiration value."
+            ) from exc
+        now = datetime.now(expiration.tzinfo) if expiration.tzinfo else datetime.now()
+        return now >= expiration
 
+    def _candidate_session(
+        self,
+        session_id: int,
+        candidate_id: int,
+        *,
+        conn: sqlite3.Connection | None = None,
+    ) -> Record | None:
+        sql = """
+            SELECT es.id, es.id AS exam_session_id, es.exam_paper_id,
+                   es.candidate_id, es.company_id, es.status, es.scheduled_at,
+                   es.started_at, es.completed_at, es.created_at,
+                   ep.duration_min, ep.title AS exam_title,
+                   ri.id AS invitation_id, ri.status AS invitation_status,
+                   ri.expires_at, jp.id AS job_posting_id,
+                   jp.title AS job_title
+            FROM exam_sessions AS es
+            JOIN recruitment_invitations AS ri
+              ON ri.exam_session_id = es.id
+             AND ri.candidate_id = es.candidate_id
+             AND ri.company_id = es.company_id
+             AND ri.exam_paper_id = es.exam_paper_id
+            JOIN exam_papers AS ep ON ep.id = es.exam_paper_id
+            JOIN job_postings AS jp
+              ON jp.id = ri.job_posting_id AND jp.company_id = ri.company_id
+            WHERE es.id = ? AND es.candidate_id = ?
+              AND ri.status IN ('accepted','cancelled','expired')
+        """
+        with _DATABASE_LOCK:
+            active_conn = conn or self._connection
+            return self._as_record(
+                active_conn.execute(sql, (session_id, candidate_id)).fetchone()
+            )
+
+    @staticmethod
+    def _company_role(conn: sqlite3.Connection, company_id: int) -> bool:
+        row = conn.execute(
+            "SELECT role FROM users WHERE id = ?", (company_id,)
+        ).fetchone()
+        return row is not None and row["role"] == "company"
+
+    # RecruitmentModel contract
     def create_job_posting(
         self,
         company_id: int,
@@ -61,15 +140,20 @@ class RecruitmentRepository:
         location: str,
         status: str,
     ) -> Record | None:
-        cursor = db.execute(
-            """
-            INSERT INTO job_postings
-                (company_id, title, description, requirements, location, status)
-            VALUES (?, ?, ?, ?, ?, ?)
-            """,
-            (company_id, title, description, requirements, location, status),
-        )
-        return self.get_job_posting(company_id, cursor.lastrowid)
+        with self._transaction() as conn:
+            cursor = conn.execute(
+                """
+                INSERT INTO job_postings
+                    (company_id, title, description, requirements, location, status)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (company_id, title, description, requirements, location, status),
+            )
+            return self._as_record(
+                conn.execute(
+                    "SELECT * FROM job_postings WHERE id = ?", (cursor.lastrowid,)
+                ).fetchone()
+            )
 
     def update_job_posting(
         self,
@@ -82,67 +166,71 @@ class RecruitmentRepository:
         location: str,
         status: str,
     ) -> Record | None:
-        cursor = db.execute(
-            """
-            UPDATE job_postings
-            SET title = ?, description = ?, requirements = ?, location = ?, status = ?
-            WHERE id = ? AND company_id = ?
-            """,
-            (title, description, requirements, location, status, position_id, company_id),
-        )
-        if cursor.rowcount == 0:
-            return None
-        return self.get_job_posting(company_id, position_id)
+        with self._transaction() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE job_postings
+                SET title = ?, description = ?, requirements = ?, location = ?,
+                    status = ?
+                WHERE id = ? AND company_id = ?
+                """,
+                (
+                    title, description, requirements, location, status,
+                    position_id, company_id,
+                ),
+            )
+            if cursor.rowcount != 1:
+                return None
+            return self._as_record(
+                conn.execute(
+                    "SELECT * FROM job_postings WHERE id = ? AND company_id = ?",
+                    (position_id, company_id),
+                ).fetchone()
+            )
 
     def get_job_posting(
         self, company_id: int, position_id: int
     ) -> Record | None:
-        return self._record(
-            db.fetchone(
-                "SELECT * FROM job_postings WHERE id = ? AND company_id = ?",
-                (position_id, company_id),
-            )
+        return self._one(
+            "SELECT * FROM job_postings WHERE company_id = ? AND id = ?",
+            (company_id, position_id),
         )
 
-    def list_job_postings(self, company_id: int) -> Sequence[Record]:
-        return [
-            dict(row)
-            for row in db.fetchall(
-                """
-                SELECT * FROM job_postings
-                WHERE company_id = ?
-                ORDER BY created_at DESC, id DESC
-                """,
-                (company_id,),
-            )
-        ]
+    def list_job_postings(self, company_id: int) -> list[Record]:
+        return self._many(
+            """
+            SELECT * FROM job_postings
+            WHERE company_id = ?
+            ORDER BY created_at DESC, id DESC
+            """,
+            (company_id,),
+        )
 
     def list_candidates(
         self, company_id: int, search: str = ""
-    ) -> Sequence[Record]:
-        company = db.fetchone(
-            "SELECT 1 FROM users WHERE id = ? AND role = 'company' AND is_active = 1",
-            (company_id,),
-        )
-        if company is None:
-            return ()
-        needle = f"%{search.strip().casefold()}%"
-        return [
-            dict(row)
-            for row in db.fetchall(
-                """
-                SELECT id, full_name, email
-                FROM users
-                WHERE role = 'candidate'
-                  AND is_active = 1
-                  AND COALESCE(is_deleted, 0) = 0
-                  AND (? = '%%' OR lower(full_name) LIKE lower(?) OR lower(email) LIKE lower(?))
-                ORDER BY full_name, id
-                """,
-                (needle, needle, needle),
-            )
-        ]
+    ) -> list[Record]:
+        with _DATABASE_LOCK:
+            if not self._company_role(self._connection, company_id):
+                return []
+            needle = f"%{search.strip().casefold()}%"
+            return [
+                dict(row)
+                for row in self._connection.execute(
+                    """
+                    SELECT id, full_name, email
+                    FROM users
+                    WHERE role = 'candidate'
+                      AND is_active = 1
+                      AND COALESCE(is_deleted, 0) = 0
+                      AND (? = '%%' OR lower(full_name) LIKE lower(?)
+                           OR lower(email) LIKE lower(?))
+                    ORDER BY full_name, id
+                    """,
+                    (needle, needle, needle),
+                ).fetchall()
+            ]
 
+    # ExamModel contract
     def create_exam(
         self,
         company_id: int,
@@ -152,39 +240,44 @@ class RecruitmentRepository:
         duration_min: int,
         total_points: float,
     ) -> Record | None:
-        cursor = db.execute(
-            """
-            INSERT INTO exam_papers
-                (title, description, created_by, duration_min, total_points)
-            VALUES (?, ?, ?, ?, ?)
-            """,
-            (title, description, company_id, duration_min, total_points),
-        )
-        return self.get_exam_for_company(company_id, cursor.lastrowid)
+        with self._transaction() as conn:
+            if not self._company_role(conn, company_id):
+                return None
+            cursor = conn.execute(
+                """
+                INSERT INTO exam_papers
+                    (title, description, created_by, duration_min,
+                     total_points, is_published)
+                VALUES (?, ?, ?, ?, ?, 0)
+                """,
+                (title, description, company_id, duration_min, total_points),
+            )
+            return self._as_record(
+                conn.execute(
+                    "SELECT * FROM exam_papers WHERE id = ?", (cursor.lastrowid,)
+                ).fetchone()
+            )
 
     def get_exam_for_company(
         self, company_id: int, exam_id: int
     ) -> Record | None:
-        row = db.fetchone(
-            self._exam_query()
-            + " WHERE ep.id = ? AND ep.created_by = ? GROUP BY ep.id",
+        return self._one(
+            "SELECT * FROM exam_papers WHERE id = ? AND created_by = ?",
             (exam_id, company_id),
         )
-        return self._record(row)
 
-    def list_exams_for_company(self, company_id: int) -> Sequence[Record]:
-        return [
-            dict(row)
-            for row in db.fetchall(
-                self._exam_query()
-                + """
-                WHERE ep.created_by = ?
-                GROUP BY ep.id
-                ORDER BY ep.created_at DESC, ep.id DESC
-                """,
-                (company_id,),
-            )
-        ]
+    def list_exams_for_company(self, company_id: int) -> list[Record]:
+        return self._many(
+            """
+            SELECT ep.*, COUNT(epq.question_id) AS question_count
+            FROM exam_papers AS ep
+            LEFT JOIN exam_paper_questions AS epq ON epq.exam_paper_id = ep.id
+            WHERE ep.created_by = ?
+            GROUP BY ep.id
+            ORDER BY ep.created_at DESC, ep.id DESC
+            """,
+            (company_id,),
+        )
 
     def add_question(
         self,
@@ -195,145 +288,222 @@ class RecruitmentRepository:
         content: str,
         difficulty: str,
         points: float,
-        options: Sequence[ExamOptionLike],
+        options: Sequence[QuestionOptionInput],
+        expert_id: int | None = None,
     ) -> Record | None:
-        connection = db.get_connection()
-        connection.execute("BEGIN IMMEDIATE")
-        try:
-            exam = connection.execute(
+        if expert_id is None:
+            raise sqlite3.IntegrityError(
+                "Question ownership is unresolved: provide the active contracted "
+                "expert's user id as expert_id."
+            )
+        if any(
+            not isinstance(option.content, str)
+            or not isinstance(option.is_correct, bool)
+            for option in options
+        ):
+            raise sqlite3.IntegrityError("Question options are invalid.")
+        option_data = [(option.content.strip(), option.is_correct) for option in options]
+        if (
+            len(option_data) < 2
+            or any(not content for content, _ in option_data)
+            or sum(is_correct for _, is_correct in option_data) != 1
+        ):
+            raise sqlite3.IntegrityError("Question options are invalid.")
+
+        with self._transaction() as conn:
+            paper = conn.execute(
                 """
-                SELECT id FROM exam_papers
-                WHERE id = ? AND created_by = ? AND is_published = 0
+                SELECT id, is_published FROM exam_papers
+                WHERE id = ? AND created_by = ?
                 """,
                 (exam_id, company_id),
             ).fetchone()
-            if exam is None:
-                connection.rollback()
+            if paper is None or paper["is_published"]:
                 return None
 
-            # The legacy question table stores the author user ID in expert_id.
-            question_cursor = connection.execute(
+            expert = conn.execute(
+                """
+                SELECT 1
+                FROM users AS u
+                JOIN company_expert_contracts AS c ON c.expert_id = u.id
+                WHERE u.id = ? AND u.role = 'expert'
+                  AND c.company_id = ? AND c.status = 'active'
+                LIMIT 1
+                """,
+                (expert_id, company_id),
+            ).fetchone()
+            if expert is None:
+                raise sqlite3.IntegrityError(
+                    "Question owner must be an expert with an active company contract."
+                )
+
+            question_cursor = conn.execute(
                 """
                 INSERT INTO question_bank
-                    (expert_id, question_type, title, content, difficulty, points)
-                VALUES (?, 'multiple_choice', ?, ?, ?, ?)
+                    (expert_id, question_type, title, content, difficulty,
+                     points, is_published)
+                VALUES (?, 'multiple_choice', ?, ?, ?, ?, 0)
                 """,
-                (company_id, title, content, difficulty, points),
+                (expert_id, title, content, difficulty, points),
             )
             question_id = question_cursor.lastrowid
-            for sort_order, option in enumerate(options):
-                connection.execute(
-                    """
-                    INSERT INTO question_options
-                        (question_id, content, is_correct, sort_order)
-                    VALUES (?, ?, ?, ?)
-                    """,
-                    (
-                        question_id,
-                        option.content,
-                        int(option.is_correct),
-                        sort_order,
-                    ),
-                )
-            connection.execute(
+            sort_order = conn.execute(
+                """
+                SELECT COALESCE(MAX(sort_order), 0) + 1
+                FROM exam_paper_questions WHERE exam_paper_id = ?
+                """,
+                (exam_id,),
+            ).fetchone()[0]
+            conn.execute(
                 """
                 INSERT INTO exam_paper_questions
                     (exam_paper_id, question_id, sort_order, points)
                 VALUES (?, ?, ?, ?)
                 """,
-                (exam_id, question_id, self._question_count(exam_id), points),
+                (exam_id, question_id, sort_order, points),
             )
-            connection.commit()
-        except sqlite3.Error:
-            connection.rollback()
-            raise
+            for index, (option_content, is_correct) in enumerate(option_data, 1):
+                conn.execute(
+                    """
+                    INSERT INTO question_options
+                        (question_id, content, is_correct, sort_order)
+                    VALUES (?, ?, ?, ?)
+                    """,
+                    (question_id, option_content, int(is_correct), index),
+                )
 
-        return self._record(
-            db.fetchone(
-                """
-                SELECT id, title, content, difficulty, points
-                FROM question_bank WHERE id = ?
-                """,
-                (question_id,),
+            question = self._as_record(
+                conn.execute(
+                    """
+                    SELECT id, expert_id, title, content, difficulty, points,
+                           question_type
+                    FROM question_bank WHERE id = ?
+                    """,
+                    (question_id,),
+                ).fetchone()
             )
-        )
-
-    @staticmethod
-    def _question_count(exam_id: int) -> int:
-        row = db.fetchone(
-            "SELECT COUNT(*) AS count FROM exam_paper_questions WHERE exam_paper_id = ?",
-            (exam_id,),
-        )
-        return int(row["count"])
+            if question is None:
+                return None
+            question["options"] = [
+                {
+                    "id": row["id"],
+                    "content": row["content"],
+                    "is_correct": bool(row["is_correct"]),
+                }
+                for row in conn.execute(
+                    """
+                    SELECT id, content, is_correct
+                    FROM question_options WHERE question_id = ?
+                    ORDER BY sort_order, id
+                    """,
+                    (question_id,),
+                ).fetchall()
+            ]
+            return question
 
     def get_user_role(self, user_id: int) -> str | None:
-        row = db.fetchone(
-            """
-            SELECT role FROM users
-            WHERE id = ? AND is_active = 1 AND COALESCE(is_deleted, 0) = 0
-            """,
-            (user_id,),
-        )
-        return row["role"] if row is not None else None
+        row = self._one("SELECT role FROM users WHERE id = ?", (user_id,))
+        role = row.get("role") if row else None
+        return role if isinstance(role, str) else None
+
+    def list_contracted_experts(self, company_id: int) -> list[Record]:
+        with _DATABASE_LOCK:
+            if not self._company_role(self._connection, company_id):
+                return []
+            return [
+                dict(row)
+                for row in self._connection.execute(
+                    """
+                    SELECT u.id, u.full_name, u.email
+                    FROM users AS u
+                    JOIN company_expert_contracts AS c ON c.expert_id = u.id
+                    WHERE c.company_id = ? AND c.status = 'active'
+                      AND u.role = 'expert' AND u.is_active = 1
+                      AND COALESCE(u.is_deleted, 0) = 0
+                    ORDER BY u.full_name, u.id
+                    """,
+                    (company_id,),
+                ).fetchall()
+            ]
 
     def publish_exam(self, company_id: int, exam_id: int) -> Record | None:
-        connection = db.get_connection()
-        cursor = connection.execute(
-            """
-            UPDATE exam_papers
-            SET is_published = 1
-            WHERE id = ? AND created_by = ? AND is_published = 0
-              AND EXISTS (
-                  SELECT 1 FROM exam_paper_questions
-                  WHERE exam_paper_id = exam_papers.id
-              )
-            """,
-            (exam_id, company_id),
-        )
-        connection.commit()
-        if cursor.rowcount == 0:
-            exam = self.get_exam_for_company(company_id, exam_id)
-            if exam is None or not exam.get("is_published"):
+        with self._transaction() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE exam_papers SET is_published = 1
+                WHERE id = ? AND created_by = ?
+                """,
+                (exam_id, company_id),
+            )
+            if cursor.rowcount != 1:
                 return None
-        return self.get_exam_for_company(company_id, exam_id)
+            return self._as_record(
+                conn.execute(
+                    "SELECT * FROM exam_papers WHERE id = ? AND created_by = ?",
+                    (exam_id, company_id),
+                ).fetchone()
+            )
 
     def get_candidate_invitation(
         self, invitation_id: int, candidate_id: int
     ) -> Record | None:
-        return self._record(
-            db.fetchone(
-                self._invitation_query()
-                + " WHERE ri.id = ? AND ri.candidate_id = ?",
-                (invitation_id, candidate_id),
-            )
+        return self._one(
+            """
+            SELECT ri.*, COALESCE(cp.company_name, company.full_name) AS company_name,
+                   jp.title AS position_title, ep.title AS exam_title,
+                   ep.duration_min, es.status AS session_status,
+                   es.scheduled_at, es.started_at
+            FROM recruitment_invitations AS ri
+            JOIN users AS company ON company.id = ri.company_id
+            LEFT JOIN company_profiles AS cp ON cp.user_id = ri.company_id
+            JOIN job_postings AS jp ON jp.id = ri.job_posting_id
+            JOIN exam_papers AS ep ON ep.id = ri.exam_paper_id
+            LEFT JOIN exam_sessions AS es ON es.id = ri.exam_session_id
+            WHERE ri.id = ? AND ri.candidate_id = ?
+            """,
+            (invitation_id, candidate_id),
         )
 
     def accept_candidate_invitation(
         self, invitation_id: int, candidate_id: int
     ) -> Record | None:
-        connection = db.get_connection()
-        connection.execute("BEGIN IMMEDIATE")
-        try:
-            invitation = connection.execute(
+        with self._transaction() as conn:
+            invitation = conn.execute(
                 """
-                SELECT ri.*, ep.total_points
-                FROM recruitment_invitations ri
-                JOIN exam_papers ep ON ep.id = ri.exam_paper_id
-                WHERE ri.id = ? AND ri.candidate_id = ?
+                SELECT * FROM recruitment_invitations
+                WHERE id = ? AND candidate_id = ?
                 """,
                 (invitation_id, candidate_id),
             ).fetchone()
             if invitation is None:
-                connection.rollback()
                 return None
-            if invitation["status"] == "accepted":
-                connection.rollback()
-                return self.get_candidate_invitation(invitation_id, candidate_id)
             if invitation["status"] != "pending":
-                connection.rollback()
+                return self.get_candidate_invitation(invitation_id, candidate_id)
+            if self._is_expired(invitation["expires_at"]):
+                expired = conn.execute(
+                    """
+                    UPDATE recruitment_invitations
+                    SET status = 'expired', responded_at = datetime('now','localtime')
+                    WHERE id = ? AND candidate_id = ? AND status = 'pending'
+                    """,
+                    (invitation_id, candidate_id),
+                )
+                if expired.rowcount != 1:
+                    raise sqlite3.IntegrityError(
+                        "Pending invitation changed while it was expiring."
+                    )
                 return self.get_candidate_invitation(invitation_id, candidate_id)
 
-            session_cursor = connection.execute(
+            paper = conn.execute(
+                """
+                SELECT duration_min, total_points
+                FROM exam_papers WHERE id = ?
+                """,
+                (invitation["exam_paper_id"],),
+            ).fetchone()
+            if paper is None:
+                return None
+            session_cursor = conn.execute(
                 """
                 INSERT INTO exam_sessions
                     (exam_paper_id, candidate_id, company_id, status,
@@ -344,39 +514,46 @@ class RecruitmentRepository:
                     invitation["exam_paper_id"],
                     candidate_id,
                     invitation["company_id"],
-                    invitation["total_points"],
+                    paper["total_points"],
                 ),
             )
             session_id = session_cursor.lastrowid
-            updated = connection.execute(
+            accepted = conn.execute(
                 """
                 UPDATE recruitment_invitations
-                SET exam_session_id = ?, status = 'accepted',
+                SET status = 'accepted', exam_session_id = ?,
                     responded_at = datetime('now','localtime')
                 WHERE id = ? AND candidate_id = ? AND status = 'pending'
                 """,
                 (session_id, invitation_id, candidate_id),
             )
-            if updated.rowcount != 1:
-                connection.rollback()
-                return None
-            connection.commit()
-        except sqlite3.Error:
-            connection.rollback()
-            raise
-        return self.get_candidate_invitation(invitation_id, candidate_id)
+            if accepted.rowcount != 1:
+                raise sqlite3.IntegrityError(
+                    "Pending invitation changed while it was being accepted."
+                )
+            return self.get_candidate_invitation(invitation_id, candidate_id)
 
     def expire_candidate_invitation(
         self, invitation_id: int, candidate_id: int
     ) -> None:
-        db.execute(
-            """
-            UPDATE recruitment_invitations
-            SET status = 'expired', responded_at = datetime('now','localtime')
-            WHERE id = ? AND candidate_id = ? AND status = 'pending'
-            """,
-            (invitation_id, candidate_id),
-        )
+        with self._transaction() as conn:
+            row = conn.execute(
+                """
+                SELECT expires_at FROM recruitment_invitations
+                WHERE id = ? AND candidate_id = ? AND status = 'pending'
+                """,
+                (invitation_id, candidate_id),
+            ).fetchone()
+            if row is None or not self._is_expired(row["expires_at"]):
+                return
+            conn.execute(
+                """
+                UPDATE recruitment_invitations
+                SET status = 'expired', responded_at = datetime('now','localtime')
+                WHERE id = ? AND candidate_id = ? AND status = 'pending'
+                """,
+                (invitation_id, candidate_id),
+            )
 
     def invite_candidate(
         self,
@@ -386,194 +563,210 @@ class RecruitmentRepository:
         candidate_id: int,
         expires_at: str | None,
     ) -> Record | None:
-        connection = db.get_connection()
-        active = connection.execute(
-            """
-            SELECT 1
-            FROM recruitment_invitations ri
-            LEFT JOIN recruitment_submissions rs ON rs.invitation_id = ri.id
-            WHERE ri.job_posting_id = ?
-              AND ri.candidate_id = ?
-              AND ri.exam_paper_id = ?
-              AND ri.status IN ('pending', 'accepted')
-              AND COALESCE(rs.status, '') <> 'released'
-            LIMIT 1
-            """,
-            (job_posting_id, candidate_id, exam_id),
-        ).fetchone()
-        if active is not None:
-            raise sqlite3.IntegrityError("An active invitation already exists.")
-        cursor = db.execute(
-            """
-            INSERT INTO recruitment_invitations
-                (job_posting_id, company_id, candidate_id, exam_paper_id, expires_at)
-            VALUES (?, ?, ?, ?, ?)
-            """,
-            (job_posting_id, company_id, candidate_id, exam_id, expires_at),
-        )
-        return self._record(
-            db.fetchone(
-                "SELECT * FROM recruitment_invitations WHERE id = ?",
-                (cursor.lastrowid,),
+        with self._transaction() as conn:
+            if not self._company_role(conn, company_id):
+                return None
+            eligible = conn.execute(
+                """
+                SELECT 1
+                FROM job_postings AS jp
+                JOIN exam_papers AS ep ON ep.id = ?
+                JOIN users AS candidate ON candidate.id = ?
+                WHERE jp.id = ? AND jp.company_id = ? AND jp.status = 'published'
+                  AND ep.created_by = ? AND ep.is_published = 1
+                  AND candidate.role = 'candidate'
+                """,
+                (exam_id, candidate_id, job_posting_id, company_id, company_id),
+            ).fetchone()
+            if eligible is None:
+                return None
+
+            existing = conn.execute(
+                """
+                SELECT * FROM recruitment_invitations
+                WHERE job_posting_id = ? AND exam_paper_id = ?
+                  AND candidate_id = ? AND company_id = ?
+                  AND status IN ('pending','accepted')
+                ORDER BY id DESC LIMIT 1
+                """,
+                (job_posting_id, exam_id, candidate_id, company_id),
+            ).fetchone()
+            if existing is not None:
+                if (
+                    existing["status"] != "pending"
+                    or not self._is_expired(existing["expires_at"])
+                ):
+                    return self._as_record(existing)
+                conn.execute(
+                    """
+                    UPDATE recruitment_invitations
+                    SET status = 'expired', responded_at = datetime('now','localtime')
+                    WHERE id = ? AND status = 'pending'
+                    """,
+                    (existing["id"],),
+                )
+
+            cursor = conn.execute(
+                """
+                INSERT INTO recruitment_invitations
+                    (job_posting_id, company_id, candidate_id, exam_paper_id,
+                     expires_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (job_posting_id, company_id, candidate_id, exam_id, expires_at),
             )
-        )
+            return self._as_record(
+                conn.execute(
+                    "SELECT * FROM recruitment_invitations WHERE id = ?",
+                    (cursor.lastrowid,),
+                ).fetchone()
+            )
 
     def list_company_submissions(
         self, company_id: int, exam_id: int
-    ) -> Sequence[Record]:
-        return [
-            dict(row)
-            for row in db.fetchall(
-                """
-                SELECT rs.id AS submission_id,
-                       rs.invitation_id,
-                       rs.exam_session_id,
-                       rs.exam_paper_id AS exam_id,
-                       rs.status,
-                       rs.submitted_at,
-                       es.total_score AS score,
-                       es.max_score,
-                       candidate.full_name AS candidate_name,
-                       jp.title AS position_title,
-                       ep.title AS assessment_title
-                FROM recruitment_submissions rs
-                JOIN exam_sessions es ON es.id = rs.exam_session_id
-                JOIN recruitment_invitations ri ON ri.id = rs.invitation_id
-                JOIN users candidate ON candidate.id = rs.candidate_id
-                JOIN job_postings jp ON jp.id = ri.job_posting_id
-                JOIN exam_papers ep ON ep.id = rs.exam_paper_id
-                WHERE rs.company_id = ?
-                  AND rs.exam_paper_id = ?
-                  AND ep.created_by = ?
-                ORDER BY rs.submitted_at DESC, rs.id DESC
-                """,
-                (company_id, exam_id, company_id),
-            )
-        ]
+    ) -> list[Record]:
+        return self._many(
+            """
+            SELECT rs.id, rs.invitation_id, rs.exam_session_id, rs.candidate_id,
+                   rs.company_id, rs.exam_paper_id, rs.status,
+                   rs.submitted_at, rs.graded_at, rs.released_at,
+                   es.total_score AS score, es.max_score,
+                   u.full_name AS candidate_name, u.email AS candidate_email,
+                   jp.title AS job_title, ep.title AS exam_title
+            FROM recruitment_submissions AS rs
+            JOIN exam_sessions AS es ON es.id = rs.exam_session_id
+            JOIN exam_papers AS ep ON ep.id = rs.exam_paper_id
+            JOIN recruitment_invitations AS ri ON ri.id = rs.invitation_id
+            JOIN job_postings AS jp ON jp.id = ri.job_posting_id
+            JOIN users AS u ON u.id = rs.candidate_id
+            WHERE rs.company_id = ? AND ep.created_by = ? AND ep.id = ?
+            ORDER BY rs.submitted_at DESC, rs.id DESC
+            """,
+            (company_id, company_id, exam_id),
+        )
 
     def release_results(self, company_id: int, exam_id: int) -> Record | None:
-        connection = db.get_connection()
-        connection.execute("BEGIN IMMEDIATE")
-        try:
-            exam = connection.execute(
-                "SELECT id FROM exam_papers WHERE id = ? AND created_by = ?",
+        with self._transaction() as conn:
+            exam = conn.execute(
+                "SELECT * FROM exam_papers WHERE id = ? AND created_by = ?",
                 (exam_id, company_id),
             ).fetchone()
             if exam is None:
-                connection.rollback()
                 return None
-            connection.execute(
+            submissions = conn.execute(
                 """
-                UPDATE recruitment_submissions
-                SET status = 'released', released_at = datetime('now','localtime')
-                WHERE company_id = ? AND exam_paper_id = ? AND status = 'graded'
+                SELECT rs.id FROM recruitment_submissions AS rs
+                JOIN exam_sessions AS es ON es.id = rs.exam_session_id
+                WHERE rs.company_id = ? AND rs.exam_paper_id = ?
+                  AND es.company_id = ? AND rs.status = 'graded'
                 """,
-                (company_id, exam_id),
-            )
-            connection.commit()
-        except sqlite3.Error:
-            connection.rollback()
-            raise
-        return self.get_exam_for_company(company_id, exam_id)
+                (company_id, exam_id, company_id),
+            ).fetchall()
+            for row in submissions:
+                conn.execute(
+                    """
+                    UPDATE recruitment_submissions
+                    SET status = 'released', released_at = datetime('now','localtime')
+                    WHERE id = ? AND status = 'graded'
+                    """,
+                    (row["id"],),
+                )
+            result = dict(exam)
+            result["status"] = "released"
+            result["released_count"] = len(submissions)
+            return result
 
-    def list_candidate_invitations(
-        self, candidate_id: int
-    ) -> Sequence[Record]:
-        return [
-            dict(row)
-            for row in db.fetchall(
-                self._invitation_query()
-                + """
-                WHERE ri.candidate_id = ?
-                ORDER BY ri.invited_at DESC, ri.id DESC
-                """,
-                (candidate_id,),
-            )
-        ]
+    def list_candidate_invitations(self, candidate_id: int) -> list[Record]:
+        return self._many(
+            """
+            SELECT ri.id, ri.job_posting_id, ri.company_id, ri.candidate_id,
+                   ri.exam_paper_id, ri.exam_session_id, ri.status,
+                   ri.invited_at, ri.responded_at, ri.expires_at,
+                   COALESCE(cp.company_name, company.full_name) AS company_name,
+                   jp.title AS position_title, ep.title AS exam_title,
+                   ep.duration_min, es.status AS session_status,
+                   es.scheduled_at, es.started_at
+            FROM recruitment_invitations AS ri
+            JOIN job_postings AS jp ON jp.id = ri.job_posting_id
+            JOIN exam_papers AS ep ON ep.id = ri.exam_paper_id
+            JOIN users AS company ON company.id = ri.company_id
+            LEFT JOIN company_profiles AS cp ON cp.user_id = ri.company_id
+            LEFT JOIN exam_sessions AS es ON es.id = ri.exam_session_id
+            WHERE ri.candidate_id = ?
+            ORDER BY ri.invited_at DESC, ri.id DESC
+            """,
+            (candidate_id,),
+        )
 
     def get_candidate_session(
         self, session_id: int, candidate_id: int
     ) -> Record | None:
-        return self._record(
-            db.fetchone(
-                """
-                SELECT es.*, ep.duration_min, ri.id AS invitation_id
-                FROM exam_sessions es
-                JOIN exam_papers ep ON ep.id = es.exam_paper_id
-                JOIN recruitment_invitations ri ON ri.exam_session_id = es.id
-                WHERE es.id = ? AND es.candidate_id = ?
-                  AND ri.candidate_id = ? AND ri.status = 'accepted'
-                """,
-                (session_id, candidate_id, candidate_id),
-            )
-        )
+        return self._candidate_session(session_id, candidate_id)
 
     def start_session_once(
         self, session_id: int, candidate_id: int
     ) -> tuple[bool, Record | None]:
-        connection = db.get_connection()
-        cursor = connection.execute(
-            """
-            UPDATE exam_sessions
-            SET status = 'in_progress',
-                started_at = COALESCE(started_at, datetime('now','localtime'))
-            WHERE id = ? AND candidate_id = ? AND status = 'scheduled'
-              AND EXISTS (
-                  SELECT 1 FROM recruitment_invitations ri
-                  WHERE ri.exam_session_id = exam_sessions.id
-                    AND ri.candidate_id = ? AND ri.status = 'accepted'
-              )
-            """,
-            (session_id, candidate_id, candidate_id),
-        )
-        connection.commit()
-        session = self.get_candidate_session(session_id, candidate_id)
-        return cursor.rowcount == 1, session
+        with self._transaction() as conn:
+            session = self._candidate_session(session_id, candidate_id, conn=conn)
+            if session is None or session["status"] != "scheduled":
+                return False, session
+            cursor = conn.execute(
+                """
+                UPDATE exam_sessions SET status = 'in_progress',
+                    started_at = datetime('now','localtime')
+                WHERE id = ? AND candidate_id = ? AND status = 'scheduled'
+                  AND EXISTS (
+                      SELECT 1 FROM recruitment_invitations AS ri
+                      WHERE ri.exam_session_id = exam_sessions.id
+                        AND ri.candidate_id = ? AND ri.status = 'accepted'
+                  )
+                """,
+                (session_id, candidate_id, candidate_id),
+            )
+            if cursor.rowcount != 1:
+                return False, self._candidate_session(
+                    session_id, candidate_id, conn=conn
+                )
+            return True, self._candidate_session(session_id, candidate_id, conn=conn)
 
     def list_candidate_questions(
         self, session_id: int, candidate_id: int
-    ) -> Sequence[Record]:
-        session = self.get_candidate_session(session_id, candidate_id)
-        if session is None or session.get("status") != "in_progress":
-            return ()
-        questions = db.fetchall(
-            """
-            SELECT qb.id,
-                   qb.title,
-                   qb.content,
-                   qb.question_type,
-                   qb.difficulty,
-                   COALESCE(epq.points, qb.points) AS points,
-                   epq.sort_order,
-                   ea.selected_option_id
-            FROM exam_sessions es
-            JOIN exam_paper_questions epq ON epq.exam_paper_id = es.exam_paper_id
-            JOIN question_bank qb ON qb.id = epq.question_id
-            LEFT JOIN exam_answers ea
-              ON ea.exam_session_id = es.id AND ea.question_id = qb.id
-            WHERE es.id = ? AND es.candidate_id = ?
-            ORDER BY epq.sort_order, qb.id
-            """,
-            (session_id, candidate_id),
-        )
-        result: list[dict[str, object]] = []
-        for question in questions:
-            options = db.fetchall(
+    ) -> list[Record]:
+        session = self._candidate_session(session_id, candidate_id)
+        if session is None or session["status"] != "in_progress":
+            return []
+        with _DATABASE_LOCK:
+            rows = self._connection.execute(
                 """
-                SELECT id, content, sort_order
-                FROM question_options
-                WHERE question_id = ?
-                ORDER BY sort_order, id
+                SELECT epq.exam_paper_id, qb.id, qb.skill_id, qb.title, qb.content,
+                       qb.question_type, qb.difficulty,
+                       COALESCE(epq.points, qb.points) AS points, epq.sort_order,
+                       ea.selected_option_id
+                FROM exam_paper_questions AS epq
+                JOIN question_bank AS qb ON qb.id = epq.question_id
+                LEFT JOIN exam_answers AS ea
+                  ON ea.exam_session_id = ? AND ea.question_id = qb.id
+                WHERE epq.exam_paper_id = ?
+                ORDER BY epq.sort_order, epq.id
                 """,
-                (question["id"],),
-            )
-            result.append(
-                {
-                    **dict(question),
-                    "options": [dict(option) for option in options],
-                }
-            )
-        return result
+                (session_id, session["exam_paper_id"]),
+            ).fetchall()
+            questions: list[Record] = []
+            for row in rows:
+                question = dict(row)
+                question["options"] = [
+                    dict(option)
+                    for option in self._connection.execute(
+                        """
+                        SELECT id, content
+                        FROM question_options WHERE question_id = ?
+                        ORDER BY sort_order, id
+                        """,
+                        (question["id"],),
+                    ).fetchall()
+                ]
+                questions.append(question)
+            return questions
 
     def save_candidate_answer(
         self,
@@ -582,120 +775,99 @@ class RecruitmentRepository:
         question_id: int,
         selected_option_id: int,
     ) -> Record | None:
-        connection = db.get_connection()
-        connection.execute("BEGIN IMMEDIATE")
-        try:
-            valid = connection.execute(
+        with self._transaction() as conn:
+            session = self._candidate_session(session_id, candidate_id, conn=conn)
+            if session is None or session["status"] != "in_progress":
+                return None
+            valid_option = conn.execute(
                 """
                 SELECT 1
-                FROM exam_sessions es
-                JOIN recruitment_invitations ri ON ri.exam_session_id = es.id
-                JOIN exam_paper_questions epq ON epq.exam_paper_id = es.exam_paper_id
-                JOIN question_options qo
-                  ON qo.question_id = epq.question_id AND qo.id = ?
-                WHERE es.id = ? AND es.candidate_id = ?
-                  AND es.status = 'in_progress'
-                  AND ri.candidate_id = ? AND ri.status = 'accepted'
-                  AND epq.question_id = ?
+                FROM exam_paper_questions AS epq
+                JOIN question_options AS qo ON qo.question_id = epq.question_id
+                WHERE epq.exam_paper_id = ? AND epq.question_id = ?
+                  AND qo.id = ?
                 """,
-                (
-                    selected_option_id,
-                    session_id,
-                    candidate_id,
-                    candidate_id,
-                    question_id,
-                ),
+                (session["exam_paper_id"], question_id, selected_option_id),
             ).fetchone()
-            if valid is None:
-                connection.rollback()
+            if valid_option is None:
                 return None
-            existing = connection.execute(
+            conn.execute(
                 """
-                SELECT id FROM exam_answers
-                WHERE exam_session_id = ? AND question_id = ?
+                INSERT INTO exam_answers
+                    (exam_session_id, question_id, selected_option_id)
+                VALUES (?, ?, ?)
+                ON CONFLICT(exam_session_id, question_id)
+                DO UPDATE SET selected_option_id = excluded.selected_option_id
                 """,
-                (session_id, question_id),
-            ).fetchone()
-            if existing is None:
-                connection.execute(
-                    """
-                    INSERT INTO exam_answers
-                        (exam_session_id, question_id, selected_option_id)
-                    VALUES (?, ?, ?)
-                    """,
-                    (session_id, question_id, selected_option_id),
-                )
-            else:
-                connection.execute(
-                    """
-                    UPDATE exam_answers SET selected_option_id = ?
-                    WHERE id = ?
-                    """,
-                    (selected_option_id, existing["id"]),
-                )
-            connection.commit()
-        except sqlite3.Error:
-            connection.rollback()
-            raise
-        return self._record(
-            db.fetchone(
-                """
-                SELECT id, exam_session_id, question_id, selected_option_id
-                FROM exam_answers
-                WHERE exam_session_id = ? AND question_id = ?
-                """,
-                (session_id, question_id),
+                (session_id, question_id, selected_option_id),
             )
-        )
+            return self._as_record(
+                conn.execute(
+                    """
+                    SELECT id, exam_session_id, question_id, selected_option_id
+                    FROM exam_answers
+                    WHERE exam_session_id = ? AND question_id = ?
+                    """,
+                    (session_id, question_id),
+                ).fetchone()
+            )
 
-    def get_grading_questions(self, session_id: int) -> Sequence[Record]:
-        questions = db.fetchall(
+    def get_grading_questions(self, session_id: int) -> list[Record]:
+        session = self._one(
             """
-            SELECT qb.id, COALESCE(epq.points, qb.points) AS points
-            FROM exam_sessions es
-            JOIN exam_paper_questions epq ON epq.exam_paper_id = es.exam_paper_id
-            JOIN question_bank qb ON qb.id = epq.question_id
-            WHERE es.id = ?
-            ORDER BY epq.sort_order, qb.id
+            SELECT es.exam_paper_id
+            FROM exam_sessions AS es
+            JOIN recruitment_invitations AS ri
+              ON ri.exam_session_id = es.id AND ri.status = 'accepted'
+            WHERE es.id = ? AND es.status = 'in_progress'
             """,
             (session_id,),
         )
-        result: list[dict[str, object]] = []
-        for question in questions:
-            options = db.fetchall(
+        if session is None:
+            return []
+        with _DATABASE_LOCK:
+            rows = self._connection.execute(
                 """
-                SELECT id, is_correct
-                FROM question_options
-                WHERE question_id = ?
-                ORDER BY sort_order, id
+                SELECT epq.question_id AS id,
+                       COALESCE(epq.points, qb.points) AS points
+                FROM exam_paper_questions AS epq
+                JOIN question_bank AS qb ON qb.id = epq.question_id
+                WHERE epq.exam_paper_id = ?
+                ORDER BY epq.sort_order, epq.id
                 """,
-                (question["id"],),
-            )
-            result.append(
-                {
-                    **dict(question),
-                    "options": [dict(option) for option in options],
-                }
-            )
-        return result
+                (session["exam_paper_id"],),
+            ).fetchall()
+            questions: list[Record] = []
+            for row in rows:
+                question = dict(row)
+                question["options"] = [
+                    dict(option)
+                    for option in self._connection.execute(
+                        """
+                        SELECT id, is_correct FROM question_options
+                        WHERE question_id = ? ORDER BY sort_order, id
+                        """,
+                        (question["id"],),
+                    ).fetchall()
+                ]
+                questions.append(question)
+            return questions
 
     def get_candidate_answers(
         self, session_id: int, candidate_id: int
-    ) -> Sequence[Record]:
-        return [
-            dict(row)
-            for row in db.fetchall(
-                """
-                SELECT ea.question_id, ea.selected_option_id
-                FROM exam_answers ea
-                JOIN exam_sessions es ON es.id = ea.exam_session_id
-                JOIN recruitment_invitations ri ON ri.exam_session_id = es.id
-                WHERE es.id = ? AND es.candidate_id = ?
-                  AND ri.candidate_id = ? AND ri.status = 'accepted'
-                """,
-                (session_id, candidate_id, candidate_id),
-            )
-        ]
+    ) -> list[Record]:
+        session = self._candidate_session(session_id, candidate_id)
+        if session is None or session["status"] != "in_progress":
+            return []
+        return self._many(
+            """
+            SELECT ea.question_id, ea.selected_option_id
+            FROM exam_answers AS ea
+            WHERE ea.exam_session_id = ?
+            ORDER BY ea.question_id
+            """,
+            (session_id,),
+        )
 
     def complete_session_once(
         self,
@@ -704,145 +876,256 @@ class RecruitmentRepository:
         *,
         score: float,
         max_score: float,
-        question_scores: Sequence[Mapping[str, int | float]],
+        question_scores: QuestionScores,
     ) -> tuple[bool, Record | None]:
-        connection = db.get_connection()
-        connection.execute("BEGIN IMMEDIATE")
-        try:
-            session = connection.execute(
-                """
-                SELECT es.*, ri.id AS invitation_id
-                FROM exam_sessions es
-                JOIN recruitment_invitations ri ON ri.exam_session_id = es.id
-                WHERE es.id = ? AND es.candidate_id = ?
-                  AND ri.candidate_id = ? AND ri.status = 'accepted'
-                """,
-                (session_id, candidate_id, candidate_id),
-            ).fetchone()
-            if session is None or session["status"] != "in_progress":
-                connection.rollback()
-                return False, self._record(session)
-
-            updated = connection.execute(
-                """
-                UPDATE exam_sessions
-                SET status = 'completed',
-                    completed_at = datetime('now','localtime'),
-                    total_score = ?,
-                    max_score = ?
-                WHERE id = ? AND candidate_id = ? AND status = 'in_progress'
-                """,
-                (score, max_score, session_id, candidate_id),
+        if (
+            isinstance(score, bool)
+            or not isinstance(score, (int, float))
+            or isinstance(max_score, bool)
+            or not isinstance(max_score, (int, float))
+            or not math.isfinite(score)
+            or not math.isfinite(max_score)
+            or score < 0
+            or max_score <= 0
+            or score > max_score
+        ):
+            raise sqlite3.IntegrityError("Invalid exam score.")
+        score_by_question: dict[int, tuple[float, float]] = {}
+        for item in question_scores:
+            if not isinstance(item, Mapping):
+                raise sqlite3.IntegrityError("Invalid per-question grade data.")
+            question_id = item.get("question_id")
+            question_score = item.get("score")
+            question_max = item.get("max_score")
+            if (
+                isinstance(question_id, bool)
+                or not isinstance(question_id, int)
+                or question_id <= 0
+                or isinstance(question_score, bool)
+                or not isinstance(question_score, (int, float))
+                or isinstance(question_max, bool)
+                or not isinstance(question_max, (int, float))
+                or not math.isfinite(question_score)
+                or not math.isfinite(question_max)
+                or question_score < 0
+                or question_max <= 0
+                or question_score > question_max
+                or question_id in score_by_question
+            ):
+                raise sqlite3.IntegrityError("Invalid per-question grade data.")
+            score_by_question[question_id] = (
+                float(question_score),
+                float(question_max),
             )
-            if updated.rowcount != 1:
-                connection.rollback()
-                return False, self._record(
-                    connection.execute(
-                        "SELECT * FROM exam_sessions WHERE id = ?",
-                        (session_id,),
-                    ).fetchone()
+        if (
+            not score_by_question
+            or not math.isclose(
+                sum(value[0] for value in score_by_question.values()),
+                score,
+            )
+            or not math.isclose(
+                sum(value[1] for value in score_by_question.values()),
+                max_score,
+            )
+        ):
+            raise sqlite3.IntegrityError("Exam grades do not match the session total.")
+
+        with self._transaction() as conn:
+            session = conn.execute(
+                """
+                SELECT es.id, es.exam_paper_id, es.candidate_id, es.company_id,
+                       es.status, ri.id AS invitation_id
+                FROM exam_sessions AS es
+                JOIN recruitment_invitations AS ri
+                  ON ri.exam_session_id = es.id
+                 AND ri.candidate_id = es.candidate_id
+                 AND ri.company_id = es.company_id
+                 AND ri.exam_paper_id = es.exam_paper_id
+                WHERE es.id = ? AND es.candidate_id = ?
+                  AND es.status = 'in_progress' AND ri.status = 'accepted'
+                """,
+                (session_id, candidate_id),
+            ).fetchone()
+            if session is None:
+                return False, None
+
+            paper_question_ids = {
+                row["question_id"]
+                for row in conn.execute(
+                    """
+                    SELECT question_id FROM exam_paper_questions
+                    WHERE exam_paper_id = ?
+                    """,
+                    (session["exam_paper_id"],),
+                ).fetchall()
+            }
+            if paper_question_ids != set(score_by_question):
+                raise sqlite3.IntegrityError(
+                    "Per-question grades do not match the exam paper."
                 )
 
-            for item in question_scores:
-                question_id = item.get("question_id")
-                question_score = item.get("score")
-                question_max = item.get("max_score")
+            answer_rows = conn.execute(
+                """
+                SELECT id, question_id, selected_option_id FROM exam_answers
+                WHERE exam_session_id = ?
+                """,
+                (session_id,),
+            ).fetchall()
+            answer_by_question = {
+                answer["question_id"]: answer for answer in answer_rows
+            }
+            expected_score = 0.0
+            for question_row in conn.execute(
+                """
+                SELECT epq.question_id, COALESCE(epq.points, qb.points) AS points
+                FROM exam_paper_questions AS epq
+                JOIN question_bank AS qb ON qb.id = epq.question_id
+                WHERE epq.exam_paper_id = ?
+                """,
+                (session["exam_paper_id"],),
+            ).fetchall():
+                options = conn.execute(
+                    """
+                    SELECT id, is_correct FROM question_options
+                    WHERE question_id = ?
+                    """,
+                    (question_row["question_id"],),
+                ).fetchall()
+                correct_options = [
+                    option["id"] for option in options if option["is_correct"] == 1
+                ]
+                if len(correct_options) != 1 or len(options) < 2:
+                    raise sqlite3.IntegrityError(
+                        "Exam question must have exactly one correct option."
+                    )
+                answer = answer_by_question.get(question_row["question_id"])
+                selected_option_id = (
+                    answer["selected_option_id"] if answer is not None else None
+                )
+                points = float(question_row["points"])
+                question_score = (
+                    points if selected_option_id == correct_options[0] else 0.0
+                )
+                stored_score = score_by_question[question_row["question_id"]]
                 if (
-                    isinstance(question_id, bool)
-                    or not isinstance(question_id, int)
-                    or isinstance(question_score, bool)
-                    or not isinstance(question_score, (int, float))
-                    or isinstance(question_max, bool)
-                    or not isinstance(question_max, (int, float))
+                    not math.isclose(stored_score[0], question_score)
+                    or not math.isclose(stored_score[1], points)
                 ):
-                    raise sqlite3.IntegrityError("Invalid computed exam grade.")
-                connection.execute(
+                    raise sqlite3.IntegrityError(
+                        "Exam grades do not match persisted candidate answers."
+                    )
+                expected_score += question_score
+            if not math.isclose(expected_score, score):
+                raise sqlite3.IntegrityError(
+                    "Exam score does not match persisted candidate answers."
+                )
+
+            for answer in answer_rows:
+                grade = score_by_question.get(answer["question_id"])
+                if grade is None:
+                    raise sqlite3.IntegrityError(
+                        "Saved answer does not belong to the exam paper."
+                    )
+                answer_update = conn.execute(
                     """
                     UPDATE exam_answers
                     SET score = ?, max_score = ?, is_graded = 1,
                         graded_at = datetime('now','localtime')
-                    WHERE exam_session_id = ? AND question_id = ?
+                    WHERE id = ? AND exam_session_id = ?
                     """,
-                    (question_score, question_max, session_id, question_id),
+                    (grade[0], grade[1], answer["id"], session_id),
+                )
+                if answer_update.rowcount != 1:
+                    raise sqlite3.IntegrityError(
+                        "Saved exam answer changed while grading."
+                    )
+
+            completed = conn.execute(
+                """
+                UPDATE exam_sessions
+                SET status = 'completed', total_score = ?, max_score = ?,
+                    completed_at = datetime('now','localtime')
+                WHERE id = ? AND candidate_id = ? AND status = 'in_progress'
+                """,
+                (score, max_score, session_id, candidate_id),
+            )
+            if completed.rowcount != 1:
+                raise sqlite3.IntegrityError(
+                    "Exam session changed while it was being submitted."
                 )
 
-            connection.execute(
+            cursor = conn.execute(
                 """
                 INSERT INTO recruitment_submissions
-                    (invitation_id, exam_session_id, candidate_id, company_id,
-                     exam_paper_id)
-                SELECT ri.id, ri.exam_session_id, ri.candidate_id, ri.company_id,
-                       ri.exam_paper_id
-                FROM recruitment_invitations ri
-                WHERE ri.id = ? AND ri.status = 'accepted'
+                    (invitation_id, exam_session_id, candidate_id,
+                     company_id, exam_paper_id)
+                VALUES (?, ?, ?, ?, ?)
                 """,
-                (session["invitation_id"],),
+                (
+                    session["invitation_id"], session_id, candidate_id,
+                    session["company_id"], session["exam_paper_id"],
+                ),
             )
-            connection.execute(
+            submission_id = cursor.lastrowid
+            grading = conn.execute(
                 """
-                UPDATE recruitment_submissions
-                SET status = 'grading'
-                WHERE exam_session_id = ? AND candidate_id = ?
-                  AND status = 'submitted'
+                UPDATE recruitment_submissions SET status = 'grading'
+                WHERE id = ? AND status = 'submitted'
                 """,
-                (session_id, candidate_id),
+                (submission_id,),
             )
-            connection.execute(
+            if grading.rowcount != 1:
+                raise sqlite3.IntegrityError(
+                    "Submission could not enter grading state."
+                )
+            graded = conn.execute(
                 """
                 UPDATE recruitment_submissions
                 SET status = 'graded', graded_at = datetime('now','localtime')
-                WHERE exam_session_id = ? AND candidate_id = ?
-                  AND status = 'grading'
+                WHERE id = ? AND status = 'grading'
                 """,
-                (session_id, candidate_id),
+                (submission_id,),
             )
-            submission = connection.execute(
-                """
-                SELECT * FROM recruitment_submissions
-                WHERE exam_session_id = ? AND candidate_id = ?
-                """,
-                (session_id, candidate_id),
-            ).fetchone()
-            connection.commit()
-        except sqlite3.Error:
-            connection.rollback()
-            raise
-        return True, self._record(submission)
+            if graded.rowcount != 1:
+                raise sqlite3.IntegrityError(
+                    "Submission could not enter graded state."
+                )
+            submission = self._as_record(
+                conn.execute(
+                    "SELECT * FROM recruitment_submissions WHERE id = ?",
+                    (submission_id,),
+                ).fetchone()
+            )
+            if submission is not None:
+                submission["score"] = score
+                submission["max_score"] = max_score
+            return True, submission
 
     def get_candidate_result(
         self, session_id: int, candidate_id: int
     ) -> Record | None:
-        return self._record(
-            db.fetchone(
-                """
-                SELECT es.id AS exam_session_id,
-                       es.total_score,
-                       es.max_score,
-                       rs.status AS submission_status,
-                       rs.submitted_at,
-                       rs.graded_at,
-                       rs.released_at
-                FROM exam_sessions es
-                JOIN recruitment_submissions rs ON rs.exam_session_id = es.id
-                WHERE es.id = ? AND rs.candidate_id = ?
-                  AND rs.status = 'released'
-                """,
-                (session_id, candidate_id),
-            )
+        return self._one(
+            """
+            SELECT es.id AS exam_session_id, es.total_score AS score,
+                   es.max_score, rs.graded_at, rs.released_at,
+                   rs.status AS submission_status
+            FROM exam_sessions AS es
+            JOIN recruitment_submissions AS rs ON rs.exam_session_id = es.id
+            WHERE es.id = ? AND es.status = 'completed'
+              AND rs.candidate_id = ? AND rs.status = 'released'
+            """,
+            (session_id, candidate_id),
         )
 
     def get_candidate_submission(
         self, session_id: int, candidate_id: int
     ) -> Record | None:
-        return self._record(
-            db.fetchone(
-                """
-                SELECT id, invitation_id, exam_session_id, candidate_id,
-                       company_id, exam_paper_id, status, submitted_at,
-                       graded_at, released_at
-                FROM recruitment_submissions
-                WHERE exam_session_id = ? AND candidate_id = ?
-                """,
-                (session_id, candidate_id),
-            )
+        return self._one(
+            """
+            SELECT id, invitation_id, exam_session_id, candidate_id, company_id,
+                   exam_paper_id, status, submitted_at, graded_at, released_at
+            FROM recruitment_submissions
+            WHERE exam_session_id = ? AND candidate_id = ?
+            """,
+            (session_id, candidate_id),
         )

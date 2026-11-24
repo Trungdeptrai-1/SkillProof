@@ -192,6 +192,7 @@ def test_company_can_create_exam_and_add_multiple_choice_question():
         ],
         5,
         "easy",
+        77,
     )
 
     assert created.success and created.exam == exam
@@ -211,10 +212,28 @@ def test_company_can_create_exam_and_add_multiple_choice_question():
         difficulty="easy",
         points=5.0,
         options=(ExamOption("List", False), ExamOption("Tuple", True)),
+        expert_id=77,
     )
     published = controller.publish_exam(5)
     assert published.success and published.exam == published_exam
     model.publish_exam.assert_called_once_with(12, 5)
+
+
+def test_company_can_list_its_contracted_question_authors():
+    _session("company", 12)
+    model, _, controller = _exam_controller()
+    expert = {"id": 77, "full_name": "Contracted Expert", "email": "expert@test"}
+    model.list_contracted_experts.return_value = [expert]
+
+    result = controller.list_contracted_experts()
+
+    assert result.success and result.experts == [expert]
+    model.list_contracted_experts.assert_called_once_with(12)
+
+    _session("candidate", 15)
+    denied = controller.list_contracted_experts()
+    assert denied.status == ExamResult.WRONG_ROLE
+    model.list_contracted_experts.assert_called_once_with(12)
 
 
 @pytest.mark.parametrize(

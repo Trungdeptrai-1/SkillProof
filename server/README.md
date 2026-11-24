@@ -29,17 +29,18 @@ những bản triển khai nghiệp vụ song song.
   nghiệp vụ quản trị và tiếp tục là placeholder.
 - `RecruitmentService` và `ExamService` điều phối nghiệp vụ qua các hợp đồng
   `RecruitmentModel`/`ExamModel`. MIG-006 và các DTO tuyển dụng đã có trên
-  `main`, nhưng chưa có Model/repository triển khai các phương thức persistence
-  cần thiết; kiểm thử nghiệp vụ hiện dùng mock, không tự tạo schema hoặc
-  migration.
-- Schema hiện có các bảng `job_postings`, `recruitment_invitations` và
-  `recruitment_submissions` cùng các bảng thi nền. Trước khi bật persistence,
-  Model cần triển khai hợp đồng Service và trả các record dạng Mapping (hoặc
-  cung cấp adapter từ DTO dataclass). `question_bank.expert_id` cũng chưa biểu
-  diễn rõ quyền sở hữu câu hỏi của Company. MIG-006 có `expires_at` cho lời
-  mời; Service kiểm tra hạn khi chấp nhận lời mời. Thời lượng bài thi được kiểm
-  tra từ `duration_min`: Service chặn xem/sửa đáp án sau khi hết giờ, nhưng vẫn
-  chấm các câu đã lưu khi ứng viên nộp bài.
+  `RecruitmentRepository` triển khai các phương thức persistence đó trên cùng
+  SQLite singleton và trả record dạng Mapping. Integration tests chạy các
+  Services thật trên SQLite tạm.
+- `question_bank.expert_id` tiếp tục lưu đúng tác giả Expert. Repository chỉ
+  tạo câu hỏi khi có `expert_id` của Expert đang có contract `active` với
+  Company; không gán Company ID vào trường này. Company UI lấy danh sách
+  Expert có hợp đồng đang hoạt động qua `ExamController` và yêu cầu chọn tác giả;
+  Service truyền ID đã chọn tới repository, nơi quyền sở hữu được xác minh lại.
+  MIG-006 có `expires_at` cho lời mời;
+  Service kiểm tra hạn khi chấp nhận. Thời lượng bài thi được kiểm tra từ
+  `duration_min`: Service chặn xem/sửa đáp án sau khi hết giờ, nhưng vẫn chấm
+  các câu đã lưu khi ứng viên nộp bài.
 - Chạy kiểm thử bằng `python -m pytest -q`; kiểm tra cú pháp bằng
   `python -m compileall -q app client server tests`.
 

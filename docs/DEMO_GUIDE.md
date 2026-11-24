@@ -94,7 +94,8 @@ finished, then remove only the named `SkillProofDemo` directory under `$env:TEMP
    complete the assigned task. Return to Dashboard and sign out from either
    role when finished.
 6. Open **Tuyển dụng & đánh giá**. Create a position and set it to **Đang
-   tuyển**, create a multiple-choice exam, then invite a registered Candidate.
+   tuyển**. When creating a multiple-choice exam, select an Expert who has an
+   active contract with the Company; then invite a registered Candidate.
 7. After the Candidate submits, open **Kết quả** and select a graded result's
    exam to publish its results. The Candidate can then view the released score.
 
@@ -114,6 +115,8 @@ are not currently available in the UI.
 - Job `employment_type` is not stored; the recruitment form exposes only fields
   supported by the current SQLite schema. Only multiple-choice questions are
   supported by the current exam UI and automatic grader.
+- A Company without an active Expert contract cannot create exam questions;
+  the UI does not assign question authors automatically.
 
 ## Verification commands
 
