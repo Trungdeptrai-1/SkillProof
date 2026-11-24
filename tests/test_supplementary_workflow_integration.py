@@ -130,11 +130,31 @@ def test_candidate_grading_monitoring_and_certificate_flow(fresh_db, auth):
     active = monitor_view.get_active_session()
     assert active is not None and active.id == session_id
     assert monitor_view.start_monitoring(session_id).success
-    assert monitor_view.record_focus_lost(session_id).success
+    camera = monitor_view.record_camera_status(session_id, "disconnected")
+    assert camera.success and camera.status == "technical_warning"
+    focus_events = [
+        monitor_view.record_focus_lost(session_id)
+        for _ in range(3)
+    ]
+    assert [event.status for event in focus_events] == [
+        "warning",
+        "warning",
+        "manual_review_required",
+    ]
     events = repository.list_exam_session_events(session_id, candidate_id)
-    assert len(events) == 1
-    assert events[0].event_type == "focus_lost"
+    assert len(events) == 4
+    assert events[0].event_type == "camera_disconnected"
     assert not events[0].is_violation
+    assert [event.is_violation for event in events[1:]] == [False, False, True]
+    assert monitor_view.stop_monitoring(session_id).success
+    assert (
+        repository.get_exam_proctoring_session(session_id, candidate_id).status
+        == "flagged"
+    )
+    assert (
+        repository.get_candidate_session(session_id, candidate_id)["status"]
+        == "in_progress"
+    )
 
     assignments = candidate_view.list_assignments()
     assert assignments.success
@@ -274,17 +294,29 @@ def test_interview_schedule_status_and_private_evaluation(fresh_db, auth):
     assert auth.login(company_email, company_password).success
     scheduled_at = (datetime.now() + timedelta(days=1)).isoformat()
     scheduled = interview_view.schedule_interview(
-        candidate_id, "Technical interview", scheduled_at, (expert_id,)
+        candidate_id,
+        "Technical interview",
+        scheduled_at,
+        (expert_id,),
+        "https://meet.example.test/interview/1",
     )
     assert scheduled.success
     interview = interview_view.list_interviews().items[0]
     assert interview.candidate_name == "Interview Candidate"
+    assert interview.meeting_url == "https://meet.example.test/interview/1"
+    link = interview_view.get_meeting_link(interview.id)
+    assert link.success and link.url == interview.meeting_url
+    participants = interview_view.list_participants(interview.id)
+    assert participants.success and len(participants.items) == 1
     assert interview_view.update_status(interview.id, "in_progress").success
     auth.logout()
 
     assert auth.login(expert_email, expert_password).success
     expert_interviews = interview_view.list_interviews()
     assert expert_interviews.success and len(expert_interviews.items) == 1
+    assert interview_view.update_status(
+        expert_interviews.items[0].id, "completed"
+    ).success
     assert interview_view.save_evaluation(
         expert_interviews.items[0].id,
         "Strong system design discussion.",
@@ -299,6 +331,12 @@ def test_interview_schedule_status_and_private_evaluation(fresh_db, auth):
     candidate_interviews = interview_view.list_interviews()
     assert candidate_interviews.success
     assert candidate_interviews.items[0].evaluation_notes == ""
+    assert not interview_view.update_status(
+        candidate_interviews.items[0].id, "cancelled"
+    ).success
+    assert not interview_view.list_participants(
+        candidate_interviews.items[0].id
+    ).success
     auth.logout()
 
     assert auth.login(company_email, company_password).success

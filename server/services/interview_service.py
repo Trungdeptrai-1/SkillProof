@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import logging
 import sqlite3
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from datetime import datetime
 from typing import Protocol
+from urllib.parse import urlsplit
 
 from app.services.auth_service import SessionManager
 from server.services.workflow_result import Record, WorkflowResult
@@ -14,7 +15,7 @@ from server.services.workflow_result import Record, WorkflowResult
 logger = logging.getLogger(__name__)
 
 INTERVIEW_STATUSES = {
-    "scheduled": frozenset({"in_progress", "cancelled", "no_show"}),
+    "scheduled": frozenset({"in_progress", "completed", "cancelled", "no_show"}),
     "in_progress": frozenset({"completed", "cancelled", "no_show"}),
     "completed": frozenset(),
     "cancelled": frozenset(),
@@ -66,6 +67,9 @@ class InterviewModel(Protocol):
         self, interview_id: int, user_id: int, role: str
     ) -> Sequence[Record]: ...
 
+    def list_interview_participants(
+        self, company_id: int, interview_id: int
+    ) -> Sequence[Record]: ...
 
 class InterviewService:
     SUCCESS = "success"
@@ -98,8 +102,15 @@ class InterviewService:
         *,
         record: Record | None = None,
         records: Sequence[Record] = (),
+        value: object | None = None,
     ) -> WorkflowResult:
-        return WorkflowResult(status, cls._MESSAGES[status], record=record, records=records)
+        return WorkflowResult(
+            status,
+            cls._MESSAGES[status],
+            record=record,
+            records=records,
+            value=value,
+        )
 
     @staticmethod
     def _identity(roles: set[str]) -> tuple[int, str] | WorkflowResult:
@@ -119,6 +130,25 @@ class InterviewService:
     @staticmethod
     def _valid_id(value: int) -> bool:
         return isinstance(value, int) and not isinstance(value, bool) and value > 0
+
+    @staticmethod
+    def _safe_meeting_url(value: object) -> str | None:
+        if value is None or value == "":
+            return None
+        if not isinstance(value, str):
+            return None
+        try:
+            parsed = urlsplit(value.strip())
+        except ValueError:
+            return None
+        if (
+            parsed.scheme != "https"
+            or not parsed.hostname
+            or parsed.username is not None
+            or parsed.password is not None
+        ):
+            return None
+        return value.strip()
 
     def schedule(
         self,
@@ -161,6 +191,9 @@ class InterviewService:
             return self._result(self.INVALID_INPUT)
         if scheduled <= datetime.now(scheduled.tzinfo):
             return self._result(self.INVALID_INPUT)
+        safe_meeting_url = self._safe_meeting_url(meeting_url)
+        if meeting_url and safe_meeting_url is None:
+            return self._result(self.INVALID_INPUT)
         try:
             record = self._model.create_interview(
                 identity[0],
@@ -169,7 +202,7 @@ class InterviewService:
                 description=description.strip(),
                 scheduled_at=scheduled.isoformat(),
                 duration_min=duration_min,
-                meeting_url=meeting_url.strip() if meeting_url else None,
+                meeting_url=safe_meeting_url,
                 expert_ids=tuple(expert_ids),
             )
         except sqlite3.Error:
@@ -186,7 +219,16 @@ class InterviewService:
         except sqlite3.Error:
             logger.exception("Could not list interviews")
             return self._result(self.DB_ERROR)
-        return self._result(self.SUCCESS, records=records)
+        sanitized = []
+        for item in records:
+            if not isinstance(item, Mapping):
+                logger.error("Interview repository returned an invalid record")
+                return self._result(self.DB_ERROR)
+            record = dict(item)
+            link = record.get("meeting_url")
+            record["meeting_url"] = self._safe_meeting_url(link) or ""
+            sanitized.append(record)
+        return self._result(self.SUCCESS, records=sanitized)
 
     def get(self, interview_id: int) -> WorkflowResult:
         identity = self._identity({"company", "expert", "candidate"})
@@ -201,7 +243,56 @@ class InterviewService:
         except sqlite3.Error:
             logger.exception("Could not load interview")
             return self._result(self.DB_ERROR)
-        return self._result(self.SUCCESS, record=record) if record else self._result(self.NOT_FOUND)
+        if record is None:
+            return self._result(self.NOT_FOUND)
+        safe_record = dict(record)
+        safe_record["meeting_url"] = self._safe_meeting_url(
+            safe_record.get("meeting_url")
+        ) or ""
+        return self._result(self.SUCCESS, record=safe_record)
+
+    def get_meeting_link(self, interview_id: int) -> WorkflowResult:
+        identity = self._identity({"company", "expert", "candidate"})
+        if isinstance(identity, WorkflowResult):
+            return identity
+        if not self._valid_id(interview_id):
+            return self._result(self.INVALID_INPUT)
+        try:
+            interview = self._model.get_interview_for_user(
+                interview_id, identity[0], identity[1]
+            )
+        except sqlite3.Error:
+            logger.exception("Could not load interview meeting link")
+            return self._result(self.DB_ERROR)
+        if interview is None:
+            return self._result(self.NOT_FOUND)
+        link = self._safe_meeting_url(interview.get("meeting_url"))
+        if interview.get("meeting_url") and link is None:
+            return self._result(self.INVALID_INPUT)
+        return self._result(
+            self.SUCCESS,
+            record={"id": interview_id, "meeting_url": link or ""},
+            value=link,
+        )
+
+    def list_participants(self, interview_id: int) -> WorkflowResult:
+        identity = self._identity({"company"})
+        if isinstance(identity, WorkflowResult):
+            return identity
+        if not self._valid_id(interview_id):
+            return self._result(self.INVALID_INPUT)
+        try:
+            if self._model.get_interview_for_user(
+                interview_id, identity[0], identity[1]
+            ) is None:
+                return self._result(self.NOT_FOUND)
+            participants = self._model.list_interview_participants(
+                identity[0], interview_id
+            )
+        except sqlite3.Error:
+            logger.exception("Could not list interview participants")
+            return self._result(self.DB_ERROR)
+        return self._result(self.SUCCESS, records=participants)
 
     def update_status(self, interview_id: int, status: str) -> WorkflowResult:
         identity = self._identity({"company", "expert"})
