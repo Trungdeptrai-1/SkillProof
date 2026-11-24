@@ -703,6 +703,10 @@ class ExamMonitorViewAdapter:
         outcome = result.value.get("outcome") if isinstance(result.value, Mapping) else ""
         return WorkflowActionResult(result.success, result.message, str(outcome or ""))
 
+    def record_camera_unavailable(self, session_id: int) -> WorkflowActionResult:
+        """Translate a UI camera outage into the service's technical event."""
+        return self.record_camera_status(session_id, "disconnected")
+
     def record_timeout(self, session_id: int) -> WorkflowActionResult:
         result = self._controller.record_event(session_id, "timeout")
         outcome = result.value.get("outcome") if isinstance(result.value, Mapping) else ""

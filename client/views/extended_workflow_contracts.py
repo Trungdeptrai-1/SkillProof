@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Generic, Literal, Protocol, TypeVar
+from typing import Generic, Literal, Protocol, TypeVar, runtime_checkable
 
 
 T = TypeVar("T")
@@ -103,7 +103,7 @@ class ActiveExamSession:
 
 
 class ExamMonitorController(Protocol):
-    """Resolve active sessions and persist explicitly disclosed focus events."""
+    """Resolve active sessions and persist disclosed exam-monitoring events."""
 
     def get_active_session(self) -> ActiveExamSession | None: ...
 
@@ -111,9 +111,19 @@ class ExamMonitorController(Protocol):
 
     def record_focus_lost(self, session_id: int) -> WorkflowActionResult: ...
 
+    def record_camera_unavailable(self, session_id: int) -> WorkflowActionResult: ...
+
     def record_timeout(self, session_id: int) -> WorkflowActionResult: ...
 
     def stop_monitoring(self, session_id: int) -> WorkflowActionResult: ...
+
+
+@runtime_checkable
+class CameraRecordingPathProvider(Protocol):
+    """Optional Controller capability for consent-based local video recording."""
+
+    def get_video_recording_path(self, session_id: int) -> str | None: ...
+
 
 @dataclass(frozen=True)
 class InterviewEntry:

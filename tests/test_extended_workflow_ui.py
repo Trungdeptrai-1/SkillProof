@@ -7,6 +7,10 @@ from PySide6.QtCore import QEvent
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QMessageBox, QPushButton
 
+from client.components.camera_capture import (
+    CameraCaptureBackend,
+    CameraDeviceOption,
+)
 from client.views.candidate_special_assessment_screen import (
     CandidateSpecialAssessmentScreen,
 )
@@ -117,6 +121,12 @@ class ManualGradingControllerMock:
 
 
 class ExamMonitorControllerMock:
+    def __init__(self):
+        self.camera_events = []
+        self.camera_event_result = WorkflowActionResult(
+            True, "Camera warning recorded"
+        )
+
     def get_active_session(self):
         return ActiveExamSession(9, "Assessment QA", "in_progress", 125)
 
@@ -126,11 +136,74 @@ class ExamMonitorControllerMock:
     def record_focus_lost(self, session_id):
         return WorkflowActionResult(True, "Recorded")
 
+    def record_camera_unavailable(self, session_id):
+        self.camera_events.append(session_id)
+        return self.camera_event_result
+
     def record_timeout(self, session_id):
         return WorkflowActionResult(True, "Timeout")
 
     def stop_monitoring(self, session_id):
         return WorkflowActionResult(True, "Stopped")
+
+
+class MockCameraBackend(CameraCaptureBackend):
+    def __init__(self, devices=None):
+        super().__init__()
+        self.devices = (
+            devices
+            if devices is not None
+            else (CameraDeviceOption(b"mock-camera", "Mock camera"),)
+        )
+        self.active = False
+        self.recording = False
+        self.started_devices = []
+        self.recording_paths = []
+        self.stop_count = 0
+
+    def available_devices(self):
+        return self.devices
+
+    def start(self, device_id, _video_widget):
+        self.started_devices.append(device_id)
+        self.active = True
+        self.state_changed.emit("active", "Mock camera active")
+
+    def stop(self):
+        self.stop_count += 1
+        self.active = False
+        self.recording = False
+        self.state_changed.emit("off", "Mock camera stopped")
+
+    def start_recording(self, output_path):
+        self.recording_paths.append(output_path)
+        self.recording = True
+        self.recording_changed.emit(True)
+
+    def stop_recording(self):
+        self.recording = False
+        self.recording_changed.emit(False)
+
+    @property
+    def is_active(self):
+        return self.active
+
+    @property
+    def is_recording(self):
+        return self.recording
+
+    def fail(self):
+        self.active = False
+        self.state_changed.emit("error", "Mock camera failure")
+
+
+class RecordingExamMonitorControllerMock(ExamMonitorControllerMock):
+    def __init__(self, recording_path):
+        super().__init__()
+        self.recording_path = recording_path
+
+    def get_video_recording_path(self, _session_id):
+        return self.recording_path
 
 
 class InterviewControllerMock:
@@ -297,27 +370,219 @@ def test_exam_monitor_only_tracks_controller_confirmed_active_session(
     assert screen._monitoring
     screen.eventFilter(qt_app, QEvent(QEvent.Type.ApplicationDeactivate))
     assert screen._alerts_table.rowCount() == 1
-    assert "Camera: không được sử dụng" in screen._camera_status.text()
+    assert "Camera: chưa bật" in screen._camera_status.text()
     screen._stop_monitoring()
     assert not screen._monitoring
     screen.close()
     unavailable.close()
 
 
-def test_interview_screen_loads_external_link_and_saves_notes(qt_app):
+def test_exam_monitor_requires_camera_consent_and_records_camera_failure(
+    qt_app, monkeypatch
+):
+    controller = ExamMonitorControllerMock()
+    camera = MockCameraBackend()
+    screen = ExamMonitorScreen(controller, camera_backend=camera)
+    answers = iter(
+        (
+            QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes,
+            QMessageBox.StandardButton.Yes,
+        )
+    )
+    monkeypatch.setattr(QMessageBox, "question", lambda *args, **kwargs: next(answers))
+
+    screen._camera_start_button.click()
+    assert not camera.started_devices
+    screen._camera_start_button.click()
+    assert camera.started_devices == [b"mock-camera"]
+    assert (
+        screen._camera_preview_stack.currentWidget() is screen._camera_preview
+    )
+
+    screen._start_button.click()
+    assert screen._monitoring
+    camera.fail()
+    assert controller.camera_events == [9]
+    assert screen._alerts_table.rowCount() == 1
+    assert screen._alert_count_label.text() == "Cảnh báo đã ghi: 1"
+    assert "không kết luận vi phạm" in screen._camera_status.text().lower()
+
+    screen._handle_back()
+    assert camera.stop_count >= 1
+    assert not camera.is_active
+    screen.close()
+
+
+def test_exam_monitor_surfaces_camera_event_persistence_failure(qt_app, monkeypatch):
+    controller = ExamMonitorControllerMock()
+    controller.camera_event_result = WorkflowActionResult(
+        False, "Controller storage unavailable"
+    )
+    camera = MockCameraBackend(devices=())
+    screen = ExamMonitorScreen(controller, camera_backend=camera)
+    monkeypatch.setattr(
+        QMessageBox,
+        "question",
+        lambda *args, **kwargs: QMessageBox.StandardButton.Yes,
+    )
+
+    screen._start_button.click()
+    screen._camera_start_button.click()
+    assert controller.camera_events == [9]
+    assert screen._alerts_table.rowCount() == 0
+    assert "Controller storage unavailable" in screen._status.text()
+    assert "mất kết nối" in screen._camera_status.text()
+    screen.close()
+
+
+def test_exam_monitor_stops_camera_when_session_countdown_expires(
+    qt_app, monkeypatch
+):
+    camera = MockCameraBackend()
+    screen = ExamMonitorScreen(
+        ExamMonitorControllerMock(), camera_backend=camera
+    )
+    screen.show()
+    qt_app.processEvents()
+    monkeypatch.setattr(
+        QMessageBox,
+        "question",
+        lambda *args, **kwargs: QMessageBox.StandardButton.Yes,
+    )
+    screen._camera_start_button.click()
+    assert camera.is_active
+
+    screen._remaining_seconds = 1
+    screen._last_tick = 0
+    screen._tick()
+    assert not camera.is_active
+    assert not camera.is_recording
+    assert not screen._timer.isActive()
+    screen.close()
+
+
+def test_exam_monitor_recording_requires_path_and_separate_consent(
+    qt_app, monkeypatch, tmp_path
+):
+    output_path = tmp_path / "exam.mp4"
+    controller = RecordingExamMonitorControllerMock(str(output_path))
+    camera = MockCameraBackend()
+    screen = ExamMonitorScreen(controller, camera_backend=camera)
+    monkeypatch.setattr(
+        QMessageBox,
+        "question",
+        lambda *args, **kwargs: QMessageBox.StandardButton.Yes,
+    )
+    screen._camera_start_button.click()
+    assert camera.is_active
+    assert screen._record_button.isEnabled()
+
+    monkeypatch.setattr(
+        QMessageBox,
+        "question",
+        lambda *args, **kwargs: QMessageBox.StandardButton.No,
+    )
+    screen._record_button.click()
+    assert not camera.recording_paths
+
+    monkeypatch.setattr(
+        QMessageBox,
+        "question",
+        lambda *args, **kwargs: QMessageBox.StandardButton.Yes,
+    )
+    screen._record_button.click()
+    assert camera.recording_paths == [str(output_path)]
+    assert "Đang ghi video cục bộ" in screen._record_status.text()
+    assert screen._stop_record_button.isEnabled()
+    screen._stop_record_button.click()
+    assert not camera.is_recording
+    assert not screen._stop_record_button.isEnabled()
+    screen._record_button.click()
+    assert len(camera.recording_paths) == 2
+
+    screen.show()
+    qt_app.processEvents()
+    screen.hide()
+    assert not camera.is_active
+    assert not camera.is_recording
+    screen.close()
+
+
+def test_exam_monitor_rejects_recording_path_that_would_overwrite(
+    qt_app, monkeypatch, tmp_path
+):
+    existing_path = tmp_path / "existing.mp4"
+    existing_path.write_bytes(b"keep")
+    controller = RecordingExamMonitorControllerMock(str(existing_path))
+    camera = MockCameraBackend()
+    screen = ExamMonitorScreen(controller, camera_backend=camera)
+    monkeypatch.setattr(
+        QMessageBox,
+        "question",
+        lambda *args, **kwargs: QMessageBox.StandardButton.Yes,
+    )
+    screen._camera_start_button.click()
+    screen._record_button.click()
+    assert not camera.recording_paths
+    assert "ghi đè" in screen._record_status.text()
+    assert existing_path.read_bytes() == b"keep"
+    screen.close()
+
+
+def test_interview_screen_loads_external_link_and_saves_notes(qt_app, monkeypatch):
     controller = InterviewControllerMock()
     screen = InterviewScreen("expert", controller)
     screen._table.selectRow(0)
     assert "https://meet.example.test/session" in screen._meeting_link.text()
+    opened_urls = []
+    monkeypatch.setattr(
+        "client.views.interview_screen.QDesktopServices.openUrl",
+        lambda url: opened_urls.append(url.toString()) or True,
+    )
+    screen._join_button.click()
+    assert opened_urls == ["https://meet.example.test/session"]
     screen._evaluation_notes.setPlainText("Strong communication.")
     screen._save_button.click()
     assert controller.saved == [(7, "Strong communication.", 3, 3, 3, 3)]
 
     candidate_view = InterviewScreen("candidate", controller)
+    candidate_view._table.selectRow(0)
     assert candidate_view._evaluation_notes.isHidden()
     assert not candidate_view._save_button.isVisible()
+    assert candidate_view._join_button.isEnabled()
     screen.close()
     candidate_view.close()
+
+
+def test_interview_screen_disables_unsafe_meeting_urls(qt_app, monkeypatch):
+    controller = InterviewControllerMock()
+    controller.list_interviews = lambda: WorkflowListResult(
+        True,
+        (
+            InterviewEntry(
+                7,
+                "Technical interview",
+                "Candidate QA",
+                "2026-11-25 10:00",
+                "in_progress",
+                "file:///private/video",
+            ),
+        ),
+    )
+    screen = InterviewScreen("candidate", controller)
+    screen._table.selectRow(0)
+    opened = []
+    monkeypatch.setattr(
+        "client.views.interview_screen.QDesktopServices.openUrl",
+        lambda url: opened.append(url.toString()) or True,
+    )
+    assert not screen._join_button.isEnabled()
+    assert "không hợp lệ" in screen._meeting_link.text()
+    screen._join_meeting()
+    assert not opened
+    assert "HTTP" in screen._status.text()
+    screen.close()
 
 
 def test_certificate_screen_respects_controller_permissions(qt_app, monkeypatch):
