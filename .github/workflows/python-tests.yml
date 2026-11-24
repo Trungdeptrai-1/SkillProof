@@ -41,5 +41,18 @@ jobs:
       - name: Check Python syntax
         run: python -m compileall -q app tests main.py
 
-      - name: Run pytest
-        run: python -m pytest tests/
+      - name: Run pytest (isolate Qt teardown by test module)
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          modules=(tests/test_*.py)
+          if (( ${#modules[@]} == 0 )); then
+            echo 'No test modules found' >&2
+            exit 1
+          fi
+          for module in "${modules[@]}"; do
+            echo "::group::${module}"
+            python -m pytest "$module"
+            echo "::endgroup::"
+          done
