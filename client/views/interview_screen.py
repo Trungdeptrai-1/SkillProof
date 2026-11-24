@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from PySide6.QtCore import QDateTime, Qt
+from PySide6.QtCore import QDateTime, Qt, QUrl
+from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QComboBox,
     QDateTimeEdit,
@@ -87,7 +88,13 @@ class InterviewScreen(QWidget):
 
         self._meeting_link = QLabel("Liên kết họp ngoài: chưa có dữ liệu.")
         self._meeting_link.setWordWrap(True)
-        layout.addWidget(self._meeting_link)
+        meeting_row = QHBoxLayout()
+        meeting_row.addWidget(self._meeting_link, stretch=1)
+        self._join_button = QPushButton("Tham gia phỏng vấn")
+        self._join_button.setStyleSheet(secondary_button_style(font_size=12))
+        self._join_button.clicked.connect(self._join_meeting)
+        meeting_row.addWidget(self._join_button)
+        layout.addLayout(meeting_row)
         self._schedule_section = QWidget()
         schedule_form = QFormLayout(self._schedule_section)
         self._candidate_id = QSpinBox()
@@ -96,7 +103,7 @@ class InterviewScreen(QWidget):
         self._expert_id.setRange(0, 2147483647)
         self._expert_id.setSpecialValueText("Không chỉ định")
         self._interview_title = QLineEdit()
-        self._interview_title.setPlaceholderText("Например: Phỏng vấn kỹ thuật")
+        self._interview_title.setPlaceholderText("Ví dụ: Phỏng vấn kỹ thuật")
         self._scheduled_at = QDateTimeEdit()
         self._scheduled_at.setCalendarPopup(True)
         self._scheduled_at.setDateTime(
@@ -160,6 +167,8 @@ class InterviewScreen(QWidget):
         layout.addWidget(self._save_button, alignment=Qt.AlignmentFlag.AlignRight)
         self._refresh_button.setEnabled(self._controller is not None)
         self._save_button.setEnabled(False)
+        self._join_button.setEnabled(False)
+        self._join_button.setVisible(self._role in {"candidate", "company", "expert"})
         if self._role == "candidate":
             self._schedule_section.hide()
             self._evaluation_label.hide()
@@ -222,11 +231,24 @@ class InterviewScreen(QWidget):
             self._evaluation_notes.clear()
             self._save_button.setEnabled(False)
             self._update_status_button.setEnabled(False)
+            self._join_button.setEnabled(False)
             return
-        self._meeting_link.setText(
-            f"Liên kết họp ngoài: {item.meeting_url or 'Chưa được cung cấp.'}"
-        )
+        meeting_url = self._meeting_url(item.meeting_url)
+        if item.meeting_url and meeting_url is None:
+            self._meeting_link.setText(
+                "Liên kết họp ngoài không hợp lệ; không thể mở an toàn."
+            )
+        else:
+            self._meeting_link.setText(
+                f"Liên kết họp ngoài: {item.meeting_url or 'Chưa được cung cấp.'}"
+            )
         self._evaluation_notes.setPlainText(item.evaluation_notes)
+        self._join_button.setEnabled(
+            self._role in {"candidate", "company", "expert"}
+            and self._controller is not None
+            and meeting_url is not None
+            and item.status in {"scheduled", "in_progress"}
+        )
         self._save_button.setEnabled(
             self._controller is not None
             and self._role == "expert"
@@ -305,6 +327,48 @@ class InterviewScreen(QWidget):
         )
         if result.success:
             self.refresh()
+
+    @staticmethod
+    def _meeting_url(value: str) -> QUrl | None:
+        url = QUrl(value.strip())
+        if (
+            not url.isValid()
+            or url.scheme().lower() not in {"http", "https"}
+            or not url.host()
+        ):
+            return None
+        return url
+
+    def _join_meeting(self) -> None:
+        if self._selected is None or self._role not in {
+            "candidate",
+            "company",
+            "expert",
+        }:
+            self._status.set_status(
+                "Bạn không có quyền tham gia buổi phỏng vấn này.", "error"
+            )
+            return
+        if self._selected.status not in {"scheduled", "in_progress"}:
+            self._status.set_status(
+                "Buổi phỏng vấn hiện không ở trạng thái có thể tham gia.",
+                "unavailable",
+            )
+            return
+        url = self._meeting_url(self._selected.meeting_url)
+        if url is None:
+            self._status.set_status(
+                "Buổi phỏng vấn chưa có liên kết HTTPS/HTTP hợp lệ.", "unavailable"
+            )
+            return
+        if not QDesktopServices.openUrl(url):
+            self._status.set_status(
+                "Không thể mở liên kết họp bằng trình duyệt hệ thống.", "error"
+            )
+            return
+        self._status.set_status(
+            "Đã mở liên kết phỏng vấn trong trình duyệt hệ thống.", "success"
+        )
 
     def _handle_back(self) -> None:
         if self._on_back_cb is not None:

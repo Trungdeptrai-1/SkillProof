@@ -131,10 +131,13 @@ def test_candidate_grading_monitoring_and_certificate_flow(fresh_db, auth):
     assert active is not None and active.id == session_id
     assert monitor_view.start_monitoring(session_id).success
     assert monitor_view.record_focus_lost(session_id).success
+    assert monitor_view.record_camera_unavailable(session_id).success
     events = repository.list_exam_session_events(session_id, candidate_id)
-    assert len(events) == 1
-    assert events[0].event_type == "focus_lost"
-    assert not events[0].is_violation
+    assert {event.event_type for event in events} == {
+        "focus_lost",
+        "camera_unavailable",
+    }
+    assert all(not event.is_violation for event in events)
 
     assignments = candidate_view.list_assignments()
     assert assignments.success

@@ -267,17 +267,26 @@ class _MonitoringRepositoryAdapter:
             candidate_id,
             event_type,
             is_violation=False,
-            details={"source": "local_application_focus"},
+            details={
+                "source": (
+                    "local_camera"
+                    if event_type == "camera_unavailable"
+                    else "local_application_focus"
+                )
+            },
         )
         events = self._repository.list_exam_session_events(
             session_id, candidate_id
         )
         focus_count = sum(item.event_type == "focus_lost" for item in events)
-        outcome = (
-            "manual_review_required"
-            if focus_count >= focus_review_threshold
-            else "warning"
-        )
+        if event_type == "camera_unavailable":
+            outcome = "technical_warning"
+        else:
+            outcome = (
+                "manual_review_required"
+                if focus_count >= focus_review_threshold
+                else "warning"
+            )
         return {
             "event_id": event.id,
             "outcome": outcome,
@@ -728,6 +737,10 @@ class ExamMonitorViewAdapter:
 
     def record_focus_lost(self, session_id: int) -> WorkflowActionResult:
         result = self._controller.record_event(session_id, "focus_lost")
+        return WorkflowActionResult(result.success, result.message, str(result.value or ""))
+
+    def record_camera_unavailable(self, session_id: int) -> WorkflowActionResult:
+        result = self._controller.record_event(session_id, "camera_unavailable")
         return WorkflowActionResult(result.success, result.message, str(result.value or ""))
 
     def record_timeout(self, session_id: int) -> WorkflowActionResult:
