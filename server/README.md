@@ -9,7 +9,7 @@ người dùng bằng `python main.py`.
 | Thư mục | Trách nhiệm | Mã nguồn hiện dùng |
 |---|---|---|
 | `database/` | Kết nối SQLite, schema và migration | `server/database/`; các import cũ trong `app/database/` được giữ tương thích |
-| `models/` | Đối tượng dữ liệu và DTO | `UserModel`, `SkillModel`, `AppSettingModel`, `AdminStatisticsModel` trong `server/models/` |
+| `models/` | Đối tượng dữ liệu và DTO | Các model tài khoản, tuyển dụng, bài thi, phỏng vấn và chứng chỉ trong `server/models/` |
 | `services/` | Xử lý nghiệp vụ và truy cập dữ liệu | `server/services/` gồm xác thực, đăng ký, hồ sơ, quản trị Admin, tuyển dụng và bài thi |
 | `controllers/` | Điều phối yêu cầu từ View tới Service | `server/controllers/` gồm auth, user, setup, profile, collaboration, admin, recruitment và exam |
 
@@ -41,6 +41,12 @@ những bản triển khai nghiệp vụ song song.
   Service kiểm tra hạn khi chấp nhận. Thời lượng bài thi được kiểm tra từ
   `duration_min`: Service chặn xem/sửa đáp án sau khi hết giờ, nhưng vẫn chấm
   các câu đã lưu khi ứng viên nộp bài.
+- MIG-007 bổ sung nhật ký sự kiện phiên thi và dữ liệu thu hồi chứng chỉ;
+  MIG-008 bổ sung phiên giám sát, consent/evidence reference, trạng thái xử lý,
+  ngôn ngữ Coding Test và kết quả chấm. Test cases dùng lại
+  `question_bank.test_cases`; câu tự luận/mã nguồn và điểm/nhận xét dùng lại
+  `exam_answers`. Hợp đồng tích hợp nằm trong
+  [`docs/FINAL_FEATURE_CONTRACT.md`](../docs/FINAL_FEATURE_CONTRACT.md).
 - Chạy kiểm thử bằng `python -m pytest -q`; kiểm tra cú pháp bằng
   `python -m compileall -q app client server tests`.
 
