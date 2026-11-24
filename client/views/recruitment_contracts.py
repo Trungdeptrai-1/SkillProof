@@ -38,6 +38,13 @@ class Assessment:
     title: str
     duration_minutes: int
     question_count: int
+    skill_id: int | None = None
+
+
+@dataclass(frozen=True)
+class SkillChoice:
+    id: int
+    name: str
 
 
 @dataclass(frozen=True)
@@ -164,6 +171,8 @@ class CompanyRecruitmentController(Protocol):
 
     def list_assessments(self) -> ListResult[Assessment]: ...
 
+    def list_skills(self) -> ListResult[SkillChoice]: ...
+
     def list_contracted_experts(self) -> ListResult[QuestionAuthor]: ...
 
     def create_assessment(
@@ -174,6 +183,7 @@ class CompanyRecruitmentController(Protocol):
         questions: tuple[QuestionDraft, ...],
         *,
         expert_id: int,
+        skill_id: int | None = None,
     ) -> ActionResult: ...
 
     def list_candidates(self, search: str = "") -> ListResult[Candidate]: ...

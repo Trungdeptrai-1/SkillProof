@@ -280,6 +280,7 @@ class RecruitmentRepository:
         description: str,
         duration_min: int,
         total_points: float,
+        skill_id: int | None = None,
     ) -> Record | None:
         with self._transaction() as conn:
             if not self._company_role(conn, company_id):
@@ -287,11 +288,18 @@ class RecruitmentRepository:
             cursor = conn.execute(
                 """
                 INSERT INTO exam_papers
-                    (title, description, created_by, duration_min,
+                    (title, description, skill_id, created_by, duration_min,
                      total_points, is_published)
-                VALUES (?, ?, ?, ?, ?, 0)
+                VALUES (?, ?, ?, ?, ?, ?, 0)
                 """,
-                (title, description, company_id, duration_min, total_points),
+                (
+                    title,
+                    description,
+                    skill_id,
+                    company_id,
+                    duration_min,
+                    total_points,
+                ),
             )
             return self._as_record(
                 conn.execute(
@@ -318,6 +326,11 @@ class RecruitmentRepository:
             ORDER BY ep.created_at DESC, ep.id DESC
             """,
             (company_id,),
+        )
+
+    def list_active_skills(self) -> list[Record]:
+        return self._many(
+            "SELECT id, name FROM skills WHERE is_active = 1 ORDER BY name, id"
         )
 
     def add_question(
@@ -820,15 +833,18 @@ class RecruitmentRepository:
                 return None
             submissions = conn.execute(
                 """
-                SELECT rs.id FROM recruitment_submissions AS rs
+                SELECT rs.id, rs.exam_session_id, rs.candidate_id, rs.company_id,
+                       es.total_score, es.max_score, ep.skill_id, ep.title
+                FROM recruitment_submissions AS rs
                 JOIN exam_sessions AS es ON es.id = rs.exam_session_id
+                JOIN exam_papers AS ep ON ep.id = rs.exam_paper_id
                 WHERE rs.company_id = ? AND rs.exam_paper_id = ?
                   AND es.company_id = ? AND rs.status = 'graded'
                 """,
                 (company_id, exam_id, company_id),
             ).fetchall()
             for row in submissions:
-                conn.execute(
+                changed = conn.execute(
                     """
                     UPDATE recruitment_submissions
                     SET status = 'released', released_at = datetime('now','localtime')
@@ -836,10 +852,106 @@ class RecruitmentRepository:
                     """,
                     (row["id"],),
                 )
+                if changed.rowcount == 1:
+                    self._create_approved_assessment(
+                        conn,
+                        candidate_id=row["candidate_id"],
+                        company_id=row["company_id"],
+                        session_id=row["exam_session_id"],
+                        skill_id=row["skill_id"],
+                        exam_title=row["title"],
+                        score=row["total_score"],
+                        max_score=row["max_score"],
+                    )
             result = dict(exam)
             result["status"] = "released"
             result["released_count"] = len(submissions)
             return result
+
+    @staticmethod
+    def _create_approved_assessment(
+        conn: sqlite3.Connection,
+        *,
+        candidate_id: int,
+        company_id: int,
+        session_id: int,
+        skill_id: int | None,
+        exam_title: str,
+        score: float | None,
+        max_score: float | None,
+    ) -> None:
+        if (
+            skill_id is None
+            or score is None
+            or max_score is None
+            or not math.isfinite(float(score))
+            or not math.isfinite(float(max_score))
+            or float(max_score) <= 0
+        ):
+            return
+        percentage = min(100.0, max(0.0, float(score) / float(max_score) * 100))
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO assessments
+                (user_id, skill_id, score, max_score, notes, status, approved_by,
+                 approved_at, source_exam_session_id)
+            VALUES (?, ?, ?, 100, ?, 'approved', ?,
+                    datetime('now','localtime'), ?)
+            """,
+            (
+                candidate_id,
+                skill_id,
+                percentage,
+                f"Released exam result: {exam_title}",
+                company_id,
+                session_id,
+            ),
+        )
+
+    def release_submission_once(
+        self, company_id: int, session_id: int
+    ) -> Record | None:
+        with self._transaction() as conn:
+            row = conn.execute(
+                """
+                SELECT rs.id, rs.exam_session_id, rs.candidate_id, rs.company_id,
+                       rs.status, es.total_score, es.max_score, ep.skill_id,
+                       ep.title
+                FROM recruitment_submissions AS rs
+                JOIN exam_sessions AS es ON es.id = rs.exam_session_id
+                JOIN exam_papers AS ep ON ep.id = rs.exam_paper_id
+                WHERE rs.exam_session_id = ? AND rs.company_id = ?
+                  AND ep.created_by = ? AND rs.status = 'graded'
+                """,
+                (session_id, company_id, company_id),
+            ).fetchone()
+            if row is None:
+                return None
+            updated = conn.execute(
+                """
+                UPDATE recruitment_submissions
+                SET status = 'released', released_at = datetime('now','localtime')
+                WHERE id = ? AND status = 'graded'
+                """,
+                (row["id"],),
+            )
+            if updated.rowcount != 1:
+                return None
+            self._create_approved_assessment(
+                conn,
+                candidate_id=row["candidate_id"],
+                company_id=row["company_id"],
+                session_id=row["exam_session_id"],
+                skill_id=row["skill_id"],
+                exam_title=row["title"],
+                score=row["total_score"],
+                max_score=row["max_score"],
+            )
+            released = conn.execute(
+                "SELECT * FROM recruitment_submissions WHERE id = ?",
+                (row["id"],),
+            ).fetchone()
+            return self._as_record(released)
 
     def list_candidate_invitations(self, candidate_id: int) -> list[Record]:
         return self._many(
@@ -937,6 +1049,107 @@ class RecruitmentRepository:
                 ]
                 questions.append(question)
             return questions
+
+    def list_candidate_question_summaries(
+        self, session_id: int, candidate_id: int
+    ) -> list[Record]:
+        session = self._candidate_session(session_id, candidate_id)
+        if session is None:
+            return []
+        return self._many(
+            """
+            SELECT qb.id, qb.title, qb.content, qb.question_type, qb.difficulty,
+                   qb.supported_languages,
+                   COALESCE(epq.points, qb.points) AS points,
+                   ea.answer_text, ea.answer_code, ea.programming_language
+            FROM exam_paper_questions AS epq
+            JOIN question_bank AS qb ON qb.id = epq.question_id
+            LEFT JOIN exam_answers AS ea
+              ON ea.exam_session_id = ? AND ea.question_id = qb.id
+            WHERE epq.exam_paper_id = ?
+            ORDER BY epq.sort_order, epq.id
+            """,
+            (session_id, session["exam_paper_id"]),
+        )
+
+    def get_exam_session_context(self, session_id: int) -> Record | None:
+        return self._one(
+            """
+            SELECT es.id, es.candidate_id, es.company_id, es.exam_paper_id,
+                   es.status AS session_status, ep.title AS exam_title
+            FROM exam_sessions AS es
+            JOIN exam_papers AS ep ON ep.id = es.exam_paper_id
+            WHERE es.id = ?
+            """,
+            (session_id,),
+        )
+
+    def list_reviewer_submissions(
+        self, reviewer_id: int, role: str
+    ) -> list[Record]:
+        if role not in {"company", "expert"}:
+            return []
+        with _DATABASE_LOCK:
+            rows = self._connection.execute(
+                """
+                SELECT rs.id, rs.exam_session_id, rs.company_id, rs.candidate_id,
+                       rs.exam_paper_id, rs.status, rs.submitted_at,
+                       rs.graded_at, rs.released_at,
+                       es.total_score AS score, es.max_score,
+                       u.full_name AS candidate_name, ep.title AS exam_title
+                FROM recruitment_submissions AS rs
+                JOIN exam_sessions AS es ON es.id = rs.exam_session_id
+                JOIN exam_papers AS ep ON ep.id = rs.exam_paper_id
+                JOIN users AS u ON u.id = rs.candidate_id
+                WHERE rs.status IN ('grading','graded')
+                ORDER BY rs.submitted_at, rs.id
+                """
+            ).fetchall()
+            return [
+                dict(row)
+                for row in rows
+                if self._reviewer_has_company_access(
+                    self._connection, row["company_id"], reviewer_id
+                )
+            ]
+
+    def list_manual_grading_items(
+        self, company_id: int, session_id: int, requester_id: int
+    ) -> list[Record]:
+        with _DATABASE_LOCK:
+            if not self._reviewer_has_company_access(
+                self._connection, company_id, requester_id
+            ):
+                return []
+            return [
+                dict(row)
+                for row in self._connection.execute(
+                    """
+                    SELECT ea.id AS answer_id, ea.exam_session_id, ea.question_id,
+                           ea.answer_text, ea.answer_code,
+                           ea.programming_language, ea.score, ea.max_score,
+                           ea.feedback, ea.is_graded, ea.graded_by, ea.graded_at,
+                           qb.title AS question_title, qb.content AS question_content,
+                           qb.question_type, u.full_name AS candidate_name,
+                           ep.title AS exam_title, rs.status AS submission_status
+                    FROM exam_answers AS ea
+                    JOIN exam_sessions AS es ON es.id = ea.exam_session_id
+                    JOIN exam_papers AS ep ON ep.id = es.exam_paper_id
+                    JOIN exam_paper_questions AS epq
+                      ON epq.exam_paper_id = es.exam_paper_id
+                     AND epq.question_id = ea.question_id
+                    JOIN question_bank AS qb ON qb.id = ea.question_id
+                    JOIN recruitment_submissions AS rs
+                      ON rs.exam_session_id = es.id
+                    JOIN users AS u ON u.id = es.candidate_id
+                    WHERE es.id = ? AND es.company_id = ?
+                      AND rs.status IN ('grading','graded')
+                      AND qb.question_type IN ('essay','coding')
+                    ORDER BY epq.sort_order, epq.id
+                    """,
+                    (session_id, company_id),
+                ).fetchall()
+            ]
 
     def save_candidate_answer(
         self,
@@ -2277,6 +2490,80 @@ class RecruitmentRepository:
             ).fetchall()
             return [InterviewModel.from_row(row) for row in rows]
 
+    def list_expert_interviews(self, expert_id: int) -> list[Record]:
+        return self._many(
+            """
+            SELECT i.*, candidate.full_name AS candidate_name
+            FROM interviews AS i
+            JOIN interview_participants AS ip ON ip.interview_id = i.id
+            JOIN users AS candidate ON candidate.id = i.candidate_id
+            WHERE ip.expert_id = ? AND ip.role = 'interviewer'
+            ORDER BY i.scheduled_at, i.id
+            """,
+            (expert_id,),
+        )
+
+    def list_user_interview_records(
+        self, user_id: int, role: str
+    ) -> list[Record]:
+        if role == "company":
+            clause = "i.company_id = ?"
+        elif role == "candidate":
+            clause = "i.candidate_id = ?"
+        elif role == "expert":
+            clause = """
+                EXISTS (
+                    SELECT 1 FROM interview_participants AS ip
+                    WHERE ip.interview_id = i.id AND ip.expert_id = ?
+                      AND ip.role = 'interviewer'
+                )
+            """
+        else:
+            return []
+        return self._many(
+            f"""
+            SELECT i.*, candidate.full_name AS candidate_name,
+                   company.full_name AS company_name
+            FROM interviews AS i
+            JOIN users AS candidate ON candidate.id = i.candidate_id
+            LEFT JOIN users AS company ON company.id = i.company_id
+            WHERE {clause}
+            ORDER BY i.scheduled_at, i.id
+            """,
+            (user_id,),
+        )
+
+    def can_evaluate_interview(self, interview_id: int, expert_id: int) -> bool:
+        row = self._one(
+            """
+            SELECT 1
+            FROM interview_participants AS ip
+            JOIN interviews AS i ON i.id = ip.interview_id
+            JOIN users AS u ON u.id = ip.expert_id
+            WHERE ip.interview_id = ? AND ip.expert_id = ?
+              AND ip.role = 'interviewer' AND u.role = 'expert'
+              AND i.status IN ('in_progress','completed')
+            """,
+            (interview_id, expert_id),
+        )
+        return row is not None
+
+    def list_expert_interview_evaluations(
+        self, expert_id: int, interview_id: int
+    ) -> list[InterviewEvaluationModel]:
+        with _DATABASE_LOCK:
+            if not self.can_evaluate_interview(interview_id, expert_id):
+                return []
+            rows = self._connection.execute(
+                """
+                SELECT * FROM interview_evaluations
+                WHERE interview_id = ? AND expert_id = ?
+                ORDER BY created_at, id
+                """,
+                (interview_id, expert_id),
+            ).fetchall()
+            return [InterviewEvaluationModel.from_row(row) for row in rows]
+
     def list_interview_participants(
         self, company_id: int, interview_id: int
     ) -> list[InterviewParticipantModel]:
@@ -2472,6 +2759,124 @@ class RecruitmentRepository:
                 "SELECT * FROM certificates WHERE id = ?", (cursor.lastrowid,)
             ).fetchone()
             return CertificateModel.from_row(row)
+
+    def get_account_role(self, user_id: int) -> str | None:
+        row = self._one("SELECT role FROM users WHERE id = ?", (user_id,))
+        return str(row["role"]) if row is not None else None
+
+    def is_active_candidate(self, candidate_id: int) -> bool:
+        row = self._one(
+            """
+            SELECT 1 FROM users
+            WHERE id = ? AND role = 'candidate' AND is_active = 1
+              AND COALESCE(is_deleted, 0) = 0
+            """,
+            (candidate_id,),
+        )
+        return row is not None
+
+    def get_approved_assessment(
+        self, candidate_id: int, skill_id: int
+    ) -> Record | None:
+        return self._one(
+            """
+            SELECT id, user_id, skill_id, score, max_score, taken_at, notes,
+                   status, approved_by, approved_at, source_exam_session_id
+            FROM assessments
+            WHERE user_id = ? AND skill_id = ? AND status = 'approved'
+            ORDER BY approved_at DESC, id DESC
+            LIMIT 1
+            """,
+            (candidate_id, skill_id),
+        )
+
+    def get_certificate_for_candidate(
+        self, candidate_id: int, skill_id: int
+    ) -> Record | None:
+        return self._certificate_record(
+            """
+            SELECT c.*, u.full_name AS subject_name, s.name AS skill_name
+            FROM certificates AS c
+            JOIN users AS u ON u.id = c.user_id
+            JOIN skills AS s ON s.id = c.skill_id
+            WHERE c.user_id = ? AND c.skill_id = ?
+            """,
+            (candidate_id, skill_id),
+        )
+
+    def get_certificate_by_code(self, cert_code: str) -> Record | None:
+        return self._certificate_record(
+            """
+            SELECT c.*, u.full_name AS subject_name, s.name AS skill_name
+            FROM certificates AS c
+            JOIN users AS u ON u.id = c.user_id
+            JOIN skills AS s ON s.id = c.skill_id
+            WHERE c.cert_code = ?
+            """,
+            (cert_code,),
+        )
+
+    def get_certificate_by_id(self, certificate_id: int) -> Record | None:
+        return self._certificate_record(
+            """
+            SELECT c.*, u.full_name AS subject_name, s.name AS skill_name
+            FROM certificates AS c
+            JOIN users AS u ON u.id = c.user_id
+            JOIN skills AS s ON s.id = c.skill_id
+            WHERE c.id = ?
+            """,
+            (certificate_id,),
+        )
+
+    def _certificate_record(
+        self, sql: str, params: tuple[object, ...]
+    ) -> Record | None:
+        return self._one(sql, params)
+
+    def can_view_certificate(
+        self, certificate_id: int, viewer_id: int, role: str
+    ) -> bool:
+        with _DATABASE_LOCK:
+            row = self._connection.execute(
+                "SELECT user_id FROM certificates WHERE id = ?",
+                (certificate_id,),
+            ).fetchone()
+            if row is None:
+                return False
+            if role == "admin":
+                return True
+            if role == "candidate":
+                return row["user_id"] == viewer_id
+            if role in {"company", "expert"}:
+                account = self._connection.execute(
+                    "SELECT 1 FROM users WHERE id = ? AND role = ? AND is_active = 1",
+                    (viewer_id, role),
+                ).fetchone()
+                return account is not None
+            return False
+
+    def list_certificates_for_viewer(
+        self, viewer_id: int, role: str
+    ) -> list[Record]:
+        if role == "admin":
+            where = ""
+            params: tuple[object, ...] = ()
+        elif role == "candidate":
+            where = "WHERE c.user_id = ?"
+            params = (viewer_id,)
+        else:
+            return []
+        return self._many(
+            f"""
+            SELECT c.*, u.full_name AS subject_name, s.name AS skill_name
+            FROM certificates AS c
+            JOIN users AS u ON u.id = c.user_id
+            JOIN skills AS s ON s.id = c.skill_id
+            {where}
+            ORDER BY c.issued_at DESC, c.id DESC
+            """,
+            params,
+        )
 
     def verify_certificate(self, cert_code: str) -> CertificateModel | None:
         if not isinstance(cert_code, str) or not cert_code.strip():

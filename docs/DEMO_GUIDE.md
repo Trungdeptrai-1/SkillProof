@@ -104,30 +104,33 @@ Services. The UI displays operation errors rather than substituting demo data.
 Company/Expert registration and Admin account creation after first-run setup
 are not currently available in the UI.
 
-## Supplementary workflow readiness
+## Supplementary workflows
 
-SQLite persistence for essay/Coding answers, manual grading, monitoring event
-metadata, interviews, and certificates is present and covered by model tests.
-The screens and navigation routes exist, but MainWindow does not yet inject
-concrete Controllers for them; the screens therefore show an unavailable state
-and disable actions. The Service model protocols also do not match the current
-`RecruitmentRepository` method contracts, and certificate issuance has no
-approved-assessment source in the current schema. Submitted code is not
-executed, and monitoring stores metadata only; no camera, screen, or audio
-capture is provided. Do not present these as integrated until the API adapters,
-authorization, and real SQLite UI workflows have been verified.
+- Candidate can save and submit persisted essay/Coding answers. Company and
+  contracted Expert can manually grade; Company publishes results, after which
+  Candidate can view the score. Coding is never executed by the application.
+- Focus monitoring starts only for the signed-in Candidate's active exam and
+  after an explicit confirmation. Focus-loss events are stored in SQLite as
+  non-violation metadata; no camera, screen, or audio is captured.
+- Company can schedule interviews for a Candidate and optionally assign a
+  contracted Expert. Company/Expert can update status; the assigned Expert can
+  save scored feedback. Candidate views do not expose evaluation notes.
+- Releasing a result for an exam linked to an active skill creates its approved
+  assessment source. Admin can issue and revoke certificates; authenticated
+  roles can verify a certificate by code. Results from unlinked exams cannot
+  qualify for certificates.
 
 ## Not implemented or still limited
 
-- Coding/essay exam UI, manual grading UI, interview evaluation UI, and
-  certificate issuance/verification UI.
+- UI for authoring essay/Coding questions; those question types must already
+  be present in the persisted exam to use the Candidate and grading screens.
 - Instructor and Student workspaces beyond placeholder dashboard content.
 - Physical skill deletion; use the supported deactivate/reactivate action.
 - Company/Expert role provisioning through public registration; use only the
   isolated demo database setup above for demo accounts.
 - Job `employment_type` is not stored; the recruitment form exposes only fields
-  supported by the current SQLite schema. Only multiple-choice questions are
-  supported by the current exam UI and automatic grader.
+  supported by the current SQLite schema. Company exam authoring remains
+  multiple-choice; essay/Coding grading is manual and no candidate code runs.
 - A Company without an active Expert contract cannot create exam questions;
   the UI does not assign question authors automatically.
 

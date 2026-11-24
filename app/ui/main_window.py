@@ -86,13 +86,48 @@ class MainWindow(QMainWindow):
         self._exam_monitor: ExamMonitorScreen | None = None
         self._interview_screen: InterviewScreen | None = None
         self._certificate_screen: CertificateScreen | None = None
+        if any(
+            controller is None
+            for controller in (
+                candidate_specialized_assessment_controller,
+                manual_grading_controller,
+                exam_monitor_controller,
+                interview_controller,
+                certificate_controller,
+            )
+        ):
+            from app.integration.supplementary_adapters import (
+                create_supplementary_view_controllers,
+            )
+
+            supplementary_defaults = create_supplementary_view_controllers()
+        else:
+            supplementary_defaults = (None, None, None, None, None)
         self._candidate_specialized_assessment_controller = (
             candidate_specialized_assessment_controller
+            if candidate_specialized_assessment_controller is not None
+            else supplementary_defaults[0]
         )
-        self._manual_grading_controller = manual_grading_controller
-        self._exam_monitor_controller = exam_monitor_controller
-        self._interview_controller = interview_controller
-        self._certificate_controller = certificate_controller
+        self._manual_grading_controller = (
+            manual_grading_controller
+            if manual_grading_controller is not None
+            else supplementary_defaults[1]
+        )
+        self._exam_monitor_controller = (
+            exam_monitor_controller
+            if exam_monitor_controller is not None
+            else supplementary_defaults[2]
+        )
+        self._interview_controller = (
+            interview_controller
+            if interview_controller is not None
+            else supplementary_defaults[3]
+        )
+        self._certificate_controller = (
+            certificate_controller
+            if certificate_controller is not None
+            else supplementary_defaults[4]
+        )
         self._admin_controller = AdminController()
         if (
             company_recruitment_controller is None

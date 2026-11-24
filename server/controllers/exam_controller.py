@@ -17,11 +17,27 @@ class ExamController:
         description: str = "",
         duration_min: int = 60,
         total_points: int | float = 100,
+        *,
+        skill_id: int | None = None,
     ) -> ExamResult:
-        if not isinstance(title, str) or not isinstance(description, str):
+        if (
+            not isinstance(title, str)
+            or not isinstance(description, str)
+            or (
+                skill_id is not None
+                and (
+                    isinstance(skill_id, bool)
+                    or not isinstance(skill_id, int)
+                )
+            )
+        ):
             return ExamResult(ExamResult.INVALID_INPUT)
+        if skill_id is None:
+            return self._service.create_exam(
+                title, description, duration_min, total_points
+            )
         return self._service.create_exam(
-            title, description, duration_min, total_points
+            title, description, duration_min, total_points, skill_id=skill_id
         )
 
     def get_exam(self, exam_id: int) -> ExamResult:

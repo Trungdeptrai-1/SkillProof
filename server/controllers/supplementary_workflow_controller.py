@@ -78,6 +78,7 @@ class ManualAssessmentController:
         *,
         answer_text: str | None = None,
         answer_code: str | None = None,
+        programming_language: str | None = None,
     ) -> WorkflowResult:
         if (
             isinstance(session_id, bool)
@@ -86,14 +87,19 @@ class ManualAssessmentController:
             or not isinstance(question_id, int)
             or (answer_text is not None and not isinstance(answer_text, str))
             or (answer_code is not None and not isinstance(answer_code, str))
+            or (
+                programming_language is not None
+                and not isinstance(programming_language, str)
+            )
         ):
             return _invalid_input()
-        return self._service.save_response(
-            session_id,
-            question_id,
-            answer_text=answer_text,
-            answer_code=answer_code,
-        )
+        arguments = {
+            "answer_text": answer_text,
+            "answer_code": answer_code,
+        }
+        if programming_language is not None:
+            arguments["programming_language"] = programming_language
+        return self._service.save_response(session_id, question_id, **arguments)
 
     def submit(self, session_id: int) -> WorkflowResult:
         if isinstance(session_id, bool) or not isinstance(session_id, int):

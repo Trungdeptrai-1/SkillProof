@@ -6,8 +6,6 @@ from collections.abc import Callable
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QCheckBox,
-    QDoubleSpinBox,
     QFormLayout,
     QHBoxLayout,
     QLabel,
@@ -90,6 +88,7 @@ class CertificateScreen(QWidget):
         )
         self._table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self._table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self._table.itemSelectionChanged.connect(self._selection_changed)
         layout.addWidget(self._table, stretch=1)
 
         self._management_section = QWidget()
@@ -114,12 +113,6 @@ class CertificateScreen(QWidget):
         self._skill_id.setRange(0, 2147483647)
         self._skill_id.setSpecialValueText("Chọn kỹ năng")
         self._skill_id.setValue(0)
-        self._has_score = QCheckBox("Ghi nhận điểm")
-        self._score = QDoubleSpinBox()
-        self._score.setRange(0, 1000000)
-        self._score.setDecimals(2)
-        self._score.setEnabled(False)
-        self._has_score.toggled.connect(self._score.setEnabled)
         self._issue_button = QPushButton("Cấp chứng chỉ")
         self._issue_button.setStyleSheet(
             primary_button_style(font_size=12, padding="8px 14px")
@@ -127,9 +120,12 @@ class CertificateScreen(QWidget):
         self._issue_button.clicked.connect(self._issue_certificate)
         issue_form.addRow("Candidate ID", self._user_id)
         issue_form.addRow("Skill ID", self._skill_id)
-        issue_form.addRow(self._has_score, self._score)
         issue_form.addRow(self._issue_button)
         management.addLayout(issue_form)
+        self._revoke_button = QPushButton("Thu hồi chứng chỉ đã chọn")
+        self._revoke_button.setStyleSheet(secondary_button_style(font_size=12))
+        self._revoke_button.clicked.connect(self._revoke_certificate)
+        issue_form.addRow(self._revoke_button)
         layout.addWidget(self._management_section)
         self._verification_status = QLabel("")
         self._verification_status.setWordWrap(True)
@@ -139,6 +135,7 @@ class CertificateScreen(QWidget):
             self._management_section.hide()
         self._refresh_button.setEnabled(self._controller is not None)
         self._set_management_enabled(False, False)
+        self._revoke_button.setEnabled(False)
 
     def refresh(self) -> None:
         if self._controller is None:
@@ -153,6 +150,8 @@ class CertificateScreen(QWidget):
             can_manage and permissions.can_issue,
             can_manage and permissions.can_verify,
         )
+        self._revoke_button.setVisible(self._role == "admin")
+        self._revoke_button.setEnabled(False)
         self._status.set_status("Đang tải chứng chỉ...", "loading")
         result = self._controller.list_certificates()
         self._table.setRowCount(0)
@@ -174,18 +173,20 @@ class CertificateScreen(QWidget):
                 certificate.expires_at or "Không thời hạn",
             )
             for column, value in enumerate(values):
-                self._table.setItem(row, column, QTableWidgetItem(value))
+                cell = QTableWidgetItem(value)
+                if column == 0:
+                    cell.setData(Qt.ItemDataRole.UserRole, certificate.id)
+                self._table.setItem(row, column, cell)
         self._status.set_status(
             "" if result.items else "Chưa có chứng chỉ.",
             "info" if result.items else "empty",
         )
+        self._revoke_button.setEnabled(False)
 
     def _set_management_enabled(self, can_issue: bool, can_verify: bool) -> None:
         self._issue_button.setEnabled(can_issue)
         self._user_id.setEnabled(can_issue)
         self._skill_id.setEnabled(can_issue)
-        self._has_score.setEnabled(can_issue)
-        self._score.setEnabled(can_issue and self._has_score.isChecked())
         self._verify_code.setEnabled(can_verify)
         self._verify_button.setEnabled(can_verify)
 
@@ -206,9 +207,8 @@ class CertificateScreen(QWidget):
         )
         if confirmation != QMessageBox.StandardButton.Yes:
             return
-        score = self._score.value() if self._has_score.isChecked() else None
         result = self._controller.issue_certificate(
-            self._user_id.value(), self._skill_id.value(), score
+            self._user_id.value(), self._skill_id.value(), None
         )
         self._status.set_status(
             result.message or (
@@ -220,6 +220,16 @@ class CertificateScreen(QWidget):
         )
         if result.success:
             self.refresh()
+
+    def _selection_changed(self) -> None:
+        row = self._table.currentRow()
+        cell = self._table.item(row, 0) if row >= 0 else None
+        certificate_id = cell.data(Qt.ItemDataRole.UserRole) if cell else None
+        self._revoke_button.setEnabled(
+            self._controller is not None
+            and self._role == "admin"
+            and isinstance(certificate_id, int)
+        )
 
     def _verify_certificate(self) -> None:
         if self._controller is None or self._role not in self._MANAGER_ROLES:
@@ -244,6 +254,36 @@ class CertificateScreen(QWidget):
             f"Mã {certificate.cert_code} — {certificate.subject_name} — "
             f"{certificate.skill_name} — {certificate.status}{score}"
         )
+
+    def _revoke_certificate(self) -> None:
+        if self._controller is None or self._role != "admin":
+            return
+        row = self._table.currentRow()
+        cell = self._table.item(row, 0) if row >= 0 else None
+        certificate_id = cell.data(Qt.ItemDataRole.UserRole) if cell else None
+        if not isinstance(certificate_id, int):
+            self._status.set_status("Chọn chứng chỉ cần thu hồi.", "error")
+            return
+        confirmation = QMessageBox.question(
+            self,
+            "Thu hồi chứng chỉ",
+            "Chứng chỉ đã thu hồi không thể được kích hoạt lại. Tiếp tục?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if confirmation != QMessageBox.StandardButton.Yes:
+            return
+        result = self._controller.revoke_certificate(certificate_id)
+        self._status.set_status(
+            result.message or (
+                "Đã thu hồi chứng chỉ."
+                if result.success
+                else "Không thể thu hồi chứng chỉ."
+            ),
+            "success" if result.success else "error",
+        )
+        if result.success:
+            self.refresh()
 
     def _handle_back(self) -> None:
         if self._on_back_cb is not None:
