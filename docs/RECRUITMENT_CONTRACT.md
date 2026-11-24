@@ -172,3 +172,30 @@ The current UI supports multiple-choice questions and automatic grading only.
 Coding/essay grading and manual score adjustment are not implemented. A
 successful submission response contains no score; the Candidate result query
 returns a score only after the Company releases that exam's graded submissions.
+
+## Additional Views awaiting Service/Controller integration
+
+The essay/Coding, manual grading, interview, monitoring, and certificate screens
+use typed Protocols in `client/views/extended_workflow_contracts.py`. MainWindow
+accepts optional Controller implementations for integration. Until a real
+Controller is supplied, affected lists remain empty and business actions are
+disabled with an explanation; the application does not seed demonstration data.
+Persistence DTOs and repository entry points for these workflows are documented
+in `docs/FINAL_FEATURE_CONTRACT.md`; no matching Service/Controller APIs are
+currently connected to the Views.
+
+Required integration boundaries:
+
+- Candidate essay/Coding APIs must scope data to the authenticated Candidate,
+  return only public test cases and supported languages, persist drafts and
+  submissions, and expose scores only after publication.
+- Manual grading must return submitted work and graded work awaiting release;
+  Controller/Service authorization and validation remain authoritative.
+- The monitor API must identify the authenticated Candidate's active session.
+  PySide6 can report local application-focus changes while the screen is active,
+  but these warnings are not persisted or sent to a server. No camera is used.
+- Interview APIs must role-scope schedules and keep unpublished evaluations
+  from Candidates. Meeting URLs are displayed only when provided by the API;
+  the UI does not create or simulate a call.
+- Certificate APIs must scope Candidate listings, derive issuance and
+  verification permissions server-side, and return certificate status/details.

@@ -71,6 +71,7 @@ class AdminDashboardScreen(QWidget):
         self._on_logout_cb: Callable[[], None] | None = None
         self._on_open_users_cb: Callable[[], None] | None = None
         self._on_open_skills_cb: Callable[[], None] | None = None
+        self._on_open_certificates_cb: Callable[[], None] | None = None
         self._setup_ui()
 
     @property
@@ -96,6 +97,16 @@ class AdminDashboardScreen(QWidget):
     @on_open_skills.setter
     def on_open_skills(self, callback: Callable[[], None] | None) -> None:
         self._on_open_skills_cb = callback
+
+    @property
+    def on_open_certificates(self) -> Callable[[], None] | None:
+        return self._on_open_certificates_cb
+
+    @on_open_certificates.setter
+    def on_open_certificates(
+        self, callback: Callable[[], None] | None
+    ) -> None:
+        self._on_open_certificates_cb = callback
 
     def _setup_ui(self) -> None:
         layout = QHBoxLayout(self)
@@ -178,8 +189,15 @@ class AdminDashboardScreen(QWidget):
             "Mở giao diện",
             self._open_skills,
         )
+        certificates_card, self._certificates_card_button = self._action_card(
+            "Chứng chỉ",
+            "Tra cứu, cấp hoặc xác minh theo quyền do Controller cấp.",
+            "Mở giao diện",
+            self._open_certificates,
+        )
         cards.addWidget(users_card)
         cards.addWidget(skills_card)
+        cards.addWidget(certificates_card)
         content_layout.addLayout(cards)
 
         note = QLabel(
@@ -228,7 +246,13 @@ class AdminDashboardScreen(QWidget):
         self._users_nav_button.clicked.connect(self._open_users)
         self._skills_nav_button = QPushButton("  Danh mục kỹ năng")
         self._skills_nav_button.clicked.connect(self._open_skills)
-        for button in (self._users_nav_button, self._skills_nav_button):
+        self._certificates_nav_button = QPushButton("  Chứng chỉ")
+        self._certificates_nav_button.clicked.connect(self._open_certificates)
+        for button in (
+            self._users_nav_button,
+            self._skills_nav_button,
+            self._certificates_nav_button,
+        ):
             button.setCursor(Qt.CursorShape.PointingHandCursor)
             button.setStyleSheet(
                 "QPushButton{background:transparent;color:rgba(255,255,255,0.85);"
@@ -353,6 +377,10 @@ class AdminDashboardScreen(QWidget):
     def _open_skills(self) -> None:
         if self._on_open_skills_cb is not None:
             self._on_open_skills_cb()
+
+    def _open_certificates(self) -> None:
+        if self._on_open_certificates_cb is not None:
+            self._on_open_certificates_cb()
 
     def _logout(self) -> None:
         auth_controller.logout()
