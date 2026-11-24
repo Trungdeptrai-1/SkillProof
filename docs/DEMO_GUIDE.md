@@ -76,7 +76,11 @@ finished, then remove only the named `SkillProofDemo` directory under `$env:TEMP
 1. From Welcome, open Login and choose Register.
 2. Register a Candidate, return to Login, and sign in.
 3. Open **Hồ sơ cá nhân**, create the profile, then edit and save it.
-4. Choose **Đăng xuất**, then sign in again to verify a new session.
+4. Open **Lời mời làm bài**, accept a Company invitation, save answers, and
+   submit once.
+5. The submitted score is hidden until the Company releases the result. Return
+   to **Kết quả** after release to view the score.
+6. Choose **Đăng xuất**, then sign in again to verify a new session.
 
 ### Company and Expert
 
@@ -89,6 +93,11 @@ finished, then remove only the named `SkillProofDemo` directory under `$env:TEMP
 5. After a contract is active, Company can create a task. Expert can start and
    complete the assigned task. Return to Dashboard and sign out from either
    role when finished.
+6. Open **Tuyển dụng & đánh giá**. Create a position and set it to **Đang
+   tuyển**. When creating a multiple-choice exam, select an Expert who has an
+   active contract with the Company; then invite a registered Candidate.
+7. After the Candidate submits, open **Kết quả** and select a graded result's
+   exam to publish its results. The Candidate can then view the released score.
 
 Role checks and writes are enforced by the corresponding Controllers and
 Services. The UI displays operation errors rather than substituting demo data.
@@ -97,12 +106,17 @@ are not currently available in the UI.
 
 ## Not implemented or still limited
 
-- Admin settings, job posting/recruitment, skill exams, grading, interview
-  evaluation, certificate issuance, and certificate verification.
+- Coding/essay exams, manual grading, interview evaluation, certificate
+  issuance, and certificate verification.
 - Instructor and Student workspaces beyond placeholder dashboard content.
 - Physical skill deletion; use the supported deactivate/reactivate action.
 - Company/Expert role provisioning through public registration; use only the
   isolated demo database setup above for demo accounts.
+- Job `employment_type` is not stored; the recruitment form exposes only fields
+  supported by the current SQLite schema. Only multiple-choice questions are
+  supported by the current exam UI and automatic grader.
+- A Company without an active Expert contract cannot create exam questions;
+  the UI does not assign question authors automatically.
 
 ## Verification commands
 
@@ -113,4 +127,5 @@ python -m compileall -q app client server tests main.py
 ```
 
 Tests and smoke tests use temporary SQLite databases. An offscreen startup
-smoke test does not replace an interactive Windows acceptance run.
+smoke test and SQLite-backed recruitment regression test do not replace an
+interactive Windows acceptance run.

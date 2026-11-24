@@ -192,6 +192,7 @@ def test_company_can_create_exam_and_add_multiple_choice_question():
         ],
         5,
         "easy",
+        77,
     )
 
     assert created.success and created.exam == exam
@@ -211,10 +212,28 @@ def test_company_can_create_exam_and_add_multiple_choice_question():
         difficulty="easy",
         points=5.0,
         options=(ExamOption("List", False), ExamOption("Tuple", True)),
+        expert_id=77,
     )
     published = controller.publish_exam(5)
     assert published.success and published.exam == published_exam
     model.publish_exam.assert_called_once_with(12, 5)
+
+
+def test_company_can_list_its_contracted_question_authors():
+    _session("company", 12)
+    model, _, controller = _exam_controller()
+    expert = {"id": 77, "full_name": "Contracted Expert", "email": "expert@test"}
+    model.list_contracted_experts.return_value = [expert]
+
+    result = controller.list_contracted_experts()
+
+    assert result.success and result.experts == [expert]
+    model.list_contracted_experts.assert_called_once_with(12)
+
+    _session("candidate", 15)
+    denied = controller.list_contracted_experts()
+    assert denied.status == ExamResult.WRONG_ROLE
+    model.list_contracted_experts.assert_called_once_with(12)
 
 
 @pytest.mark.parametrize(
@@ -416,6 +435,30 @@ def test_candidate_question_payload_redacts_answer_keys():
     assert all("is_correct" not in option for option in question["options"])
 
 
+def test_candidate_question_payload_includes_only_its_saved_option():
+    _session("candidate", 15)
+    model, _, controller = _exam_controller()
+    model.get_candidate_session.return_value = _active_session()
+    model.list_candidate_questions.return_value = [
+        {
+            "id": 31,
+            "title": "Question",
+            "selected_option_id": 2,
+            "options": [
+                {"id": 1, "content": "Wrong", "is_correct": False},
+                {"id": 2, "content": "Right", "is_correct": True},
+            ],
+        }
+    ]
+
+    result = controller.list_questions(23)
+
+    assert result.success
+    question = result.questions[0]
+    assert question["selected_option_id"] == 2
+    assert all("is_correct" not in option for option in question["options"])
+
+
 def test_candidate_cannot_change_answers_after_submission():
     _session("candidate", 15)
     model, _, controller = _exam_controller()
@@ -473,7 +516,9 @@ def test_expired_exam_rejects_answer_changes_but_grades_saved_answers():
     submitted = controller.submit_exam(23)
 
     assert submitted.success
-    assert (submitted.score, submitted.max_score) == (0, 3)
+    assert submitted.score is None
+    assert submitted.max_score is None
+    assert submitted.result == {"status": "submitted"}
     model.complete_session_once.assert_called_once()
 
 
@@ -511,7 +556,9 @@ def test_submission_automatically_grades_once_and_is_idempotent():
     submitted = controller.submit_exam(23)
 
     assert submitted.success
-    assert (submitted.score, submitted.max_score) == (5, 8)
+    assert submitted.score is None
+    assert submitted.max_score is None
+    assert submitted.result == {"status": "submitted"}
     model.complete_session_once.assert_called_once_with(
         23,
         15,

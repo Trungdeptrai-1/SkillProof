@@ -34,9 +34,10 @@ những bản triển khai nghiệp vụ song song.
   Services thật trên SQLite tạm.
 - `question_bank.expert_id` tiếp tục lưu đúng tác giả Expert. Repository chỉ
   tạo câu hỏi khi có `expert_id` của Expert đang có contract `active` với
-  Company; không gán Company ID vào trường này. `ExamService.add_question()`
-  hiện không truyền `expert_id`, vì vậy yêu cầu Trung/Dũng đồng bộ chữ ký trước
-  khi bật thao tác tạo câu hỏi từ Service. MIG-006 có `expires_at` cho lời mời;
+  Company; không gán Company ID vào trường này. Company UI lấy danh sách
+  Expert có hợp đồng đang hoạt động qua `ExamController` và yêu cầu chọn tác giả;
+  Service truyền ID đã chọn tới repository, nơi quyền sở hữu được xác minh lại.
+  MIG-006 có `expires_at` cho lời mời;
   Service kiểm tra hạn khi chấp nhận. Thời lượng bài thi được kiểm tra từ
   `duration_min`: Service chặn xem/sửa đáp án sau khi hết giờ, nhưng vẫn chấm
   các câu đã lưu khi ứng viên nộp bài.

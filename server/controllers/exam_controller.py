@@ -32,6 +32,9 @@ class ExamController:
     def list_exams(self) -> ExamResult:
         return self._service.list_exams()
 
+    def list_contracted_experts(self) -> ExamResult:
+        return self._service.list_contracted_experts()
+
     def publish_exam(self, exam_id: int) -> ExamResult:
         if isinstance(exam_id, bool) or not isinstance(exam_id, int):
             return ExamResult(ExamResult.INVALID_INPUT)
@@ -45,6 +48,7 @@ class ExamController:
         options: Sequence[ExamOption],
         points: int | float = 10,
         difficulty: str = "medium",
+        expert_id: int | None = None,
     ) -> ExamResult:
         if (
             isinstance(exam_id, bool)
@@ -53,10 +57,17 @@ class ExamController:
             or not isinstance(content, str)
             or not isinstance(difficulty, str)
             or not isinstance(options, Sequence)
+            or (
+                expert_id is not None
+                and (
+                    isinstance(expert_id, bool)
+                    or not isinstance(expert_id, int)
+                )
+            )
         ):
             return ExamResult(ExamResult.INVALID_INPUT)
         return self._service.add_question(
-            exam_id, title, content, options, points, difficulty
+            exam_id, title, content, options, points, difficulty, expert_id
         )
 
     def invite_candidate(

@@ -1,8 +1,7 @@
 # Recruitment and exam data contract
 
-This contract describes the database records shared by the Company, Candidate,
-and exam workflows. It reuses the existing exam/question tables and does not
-change Authentication, UI, Controllers, or Services.
+This contract describes the shared data and API boundaries used by the Company,
+Candidate, and exam workflows. It reuses the existing exam/question tables.
 
 ## Tables and ownership
 
@@ -42,10 +41,10 @@ created. Job ownership and invitation/submission identity fields are immutable
 after creation (the invitation's exam session can be linked once on acceptance).
 
 `question_bank.expert_id` remains the author and must not be filled with the
-Company's id. The persistence layer accepts a question only with an explicit
-Expert id who has an `active` contract with that Company. The current
-`ExamService.add_question()` call does not provide that id; do not infer an
-author by choosing an arbitrary contracted Expert.
+Company's id. The Company workflow lists only Experts with an active contract;
+the user selects the question author, and `ExamService.add_question()` passes
+that explicit id to persistence. The repository verifies the contract again
+when saving, so a stale or unrelated selection is rejected.
 
 ## Lifecycle and status values
 
@@ -140,3 +139,36 @@ MIG-006 adds `job_postings`, `recruitment_invitations`, and
 rewrite existing user, question, paper, session, or answer data. The migration
 is idempotent and runs after MIG-005 for both new databases and existing
 databases using the established migration chain.
+
+## Application integration
+
+`RecruitmentRepository` implements the persistence contracts consumed by
+`RecruitmentService` and `ExamService`. The Services derive Company and
+Candidate IDs from `SessionManager`; the repository repeats ownership scoping
+in its reads and writes. `RecruitmentController` and `ExamController` are
+connected to the Views through the application adapters in
+`app/integration/recruitment_adapters.py`.
+
+| View operation | Controller/Service API | Data used |
+|---|---|---|
+| List/create/update positions | `RecruitmentController.list_positions`, `create_position`, `update_position` | `job_postings` |
+| Find candidates | `RecruitmentController.list_candidates` | Active, non-deleted Candidate `users` rows; only id, name, email are returned |
+| List contracted question authors | `ExamController.list_contracted_experts` | Active `company_expert_contracts` and Expert `users` rows |
+| List/create exams and invite candidates | `ExamController.list_exams`, `create_exam`, `add_question`, `publish_exam`, `invite_candidate` | `exam_papers`, `question_bank`, `question_options`, `exam_paper_questions`, `recruitment_invitations` |
+| Candidate invitations and attempts | `ExamController.list_invitations`, `accept_invitation`, `start_exam`, `list_questions`, `save_answer`, `submit_exam` | `recruitment_invitations`, `exam_sessions`, `exam_answers` |
+| Company results and publication | `ExamController.list_submissions`, `release_results` | `recruitment_submissions`, `exam_sessions` |
+| Candidate result | `ExamController.get_result` | Released `recruitment_submissions` only |
+
+The View speaks in invitation IDs while exam Services operate on session IDs;
+the application adapter resolves this mapping from the Candidate's own
+invitation records. The adapter does not provide in-memory or fabricated data.
+
+`employment_type` is not present in MIG-006 or `JobPostingModel`; it is not
+persisted or shown by the integrated View. Position status uses the schema
+values `draft`, `published`, and `closed`. A published position is required
+before an invitation can be sent.
+
+The current UI supports multiple-choice questions and automatic grading only.
+Coding/essay grading and manual score adjustment are not implemented. A
+successful submission response contains no score; the Candidate result query
+returns a score only after the Company releases that exam's graded submissions.

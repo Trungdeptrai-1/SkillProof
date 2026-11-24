@@ -150,6 +150,11 @@ def test_real_services_persist_full_recruitment_exam_and_result_flow(recruitment
     )
     assert created_exam.status == ExamResult.SUCCESS
     exam_id = created_exam.exam["id"]
+    authors = exam_service.list_contracted_experts()
+    assert authors.success
+    assert [expert["id"] for expert in authors.experts] == [
+        user_ids["expert"]
+    ]
 
     missing_owner = exam_service.add_question(
         exam_id,
@@ -164,17 +169,17 @@ def test_real_services_persist_full_recruitment_exam_and_result_flow(recruitment
         "SELECT COUNT(*) FROM question_bank"
     ).fetchone()[0] == 0
 
-    question = repository.add_question(
-        user_ids["company"],
+    created_question = exam_service.add_question(
         exam_id,
-        expert_id=user_ids["expert"],
-        title="Python tuple",
-        content="Which value is immutable?",
-        difficulty="easy",
-        points=10,
-        options=(ExamOption("List", False), ExamOption("Tuple", True)),
+        "Python tuple",
+        "Which value is immutable?",
+        (ExamOption("List", False), ExamOption("Tuple", True)),
+        10,
+        "easy",
+        expert_id=authors.experts[0]["id"],
     )
-    assert question is not None
+    assert created_question.success and created_question.question is not None
+    question = created_question.question
     stored_owner = recruitment_data["connection"].execute(
         "SELECT expert_id FROM question_bank WHERE id = ?", (question["id"],)
     ).fetchone()["expert_id"]
@@ -216,7 +221,7 @@ def test_real_services_persist_full_recruitment_exam_and_result_flow(recruitment
     ).success
 
     submitted = exam_service.submit_exam(session_id)
-    assert submitted.success and submitted.score == 10
+    assert submitted.success and submitted.score is None
     assert exam_service.submit_exam(session_id).status == ExamResult.ALREADY_SUBMITTED
     assert exam_service.get_result(session_id).status == ExamResult.RESULT_NOT_RELEASED
 
@@ -269,6 +274,43 @@ def test_company_scoping_and_expert_question_ownership(recruitment_data):
     assert recruitment_data["connection"].execute(
         "SELECT expert_id FROM question_bank WHERE id = ?", (question["id"],)
     ).fetchone()["expert_id"] == user_ids["expert"]
+
+
+def test_repository_rejects_question_authors_without_an_active_contract(
+    recruitment_data,
+):
+    repository = recruitment_data["repository"]
+    connection = recruitment_data["connection"]
+    company_id = recruitment_data["user_ids"]["company"]
+    outsider_id = connection.execute(
+        """
+        INSERT INTO users (username, email, password, full_name, role)
+        VALUES ('uncontracted-expert', 'uncontracted@example.test',
+                'test-hash', 'Uncontracted Expert', 'expert')
+        """
+    ).lastrowid
+    exam = repository.create_exam(
+        company_id,
+        title="Contract check",
+        description="",
+        duration_min=30,
+        total_points=10,
+    )
+    assert exam is not None
+
+    with pytest.raises(sqlite3.IntegrityError, match="active company contract"):
+        repository.add_question(
+            company_id,
+            exam["id"],
+            expert_id=outsider_id,
+            title="Question",
+            content="Prompt",
+            difficulty="easy",
+            points=10,
+            options=(ExamOption("A", True), ExamOption("B", False)),
+        )
+
+    assert connection.execute("SELECT COUNT(*) FROM question_bank").fetchone()[0] == 0
 
 
 def test_concurrent_completion_persists_one_submission_atomically(recruitment_data):

@@ -206,6 +206,30 @@ class RecruitmentRepository:
             (company_id,),
         )
 
+    def list_candidates(
+        self, company_id: int, search: str = ""
+    ) -> list[Record]:
+        with _DATABASE_LOCK:
+            if not self._company_role(self._connection, company_id):
+                return []
+            needle = f"%{search.strip().casefold()}%"
+            return [
+                dict(row)
+                for row in self._connection.execute(
+                    """
+                    SELECT id, full_name, email
+                    FROM users
+                    WHERE role = 'candidate'
+                      AND is_active = 1
+                      AND COALESCE(is_deleted, 0) = 0
+                      AND (? = '%%' OR lower(full_name) LIKE lower(?)
+                           OR lower(email) LIKE lower(?))
+                    ORDER BY full_name, id
+                    """,
+                    (needle, needle, needle),
+                ).fetchall()
+            ]
+
     # ExamModel contract
     def create_exam(
         self,
@@ -245,9 +269,12 @@ class RecruitmentRepository:
     def list_exams_for_company(self, company_id: int) -> list[Record]:
         return self._many(
             """
-            SELECT * FROM exam_papers
-            WHERE created_by = ?
-            ORDER BY created_at DESC, id DESC
+            SELECT ep.*, COUNT(epq.question_id) AS question_count
+            FROM exam_papers AS ep
+            LEFT JOIN exam_paper_questions AS epq ON epq.exam_paper_id = ep.id
+            WHERE ep.created_by = ?
+            GROUP BY ep.id
+            ORDER BY ep.created_at DESC, ep.id DESC
             """,
             (company_id,),
         )
@@ -379,6 +406,26 @@ class RecruitmentRepository:
         role = row.get("role") if row else None
         return role if isinstance(role, str) else None
 
+    def list_contracted_experts(self, company_id: int) -> list[Record]:
+        with _DATABASE_LOCK:
+            if not self._company_role(self._connection, company_id):
+                return []
+            return [
+                dict(row)
+                for row in self._connection.execute(
+                    """
+                    SELECT u.id, u.full_name, u.email
+                    FROM users AS u
+                    JOIN company_expert_contracts AS c ON c.expert_id = u.id
+                    WHERE c.company_id = ? AND c.status = 'active'
+                      AND u.role = 'expert' AND u.is_active = 1
+                      AND COALESCE(u.is_deleted, 0) = 0
+                    ORDER BY u.full_name, u.id
+                    """,
+                    (company_id,),
+                ).fetchall()
+            ]
+
     def publish_exam(self, company_id: int, exam_id: int) -> Record | None:
         with self._transaction() as conn:
             cursor = conn.execute(
@@ -402,9 +449,13 @@ class RecruitmentRepository:
     ) -> Record | None:
         return self._one(
             """
-            SELECT ri.*, jp.title AS job_title, ep.title AS exam_title,
-                   ep.duration_min, es.status AS exam_status
+            SELECT ri.*, COALESCE(cp.company_name, company.full_name) AS company_name,
+                   jp.title AS position_title, ep.title AS exam_title,
+                   ep.duration_min, es.status AS session_status,
+                   es.scheduled_at, es.started_at
             FROM recruitment_invitations AS ri
+            JOIN users AS company ON company.id = ri.company_id
+            LEFT JOIN company_profiles AS cp ON cp.user_id = ri.company_id
             JOIN job_postings AS jp ON jp.id = ri.job_posting_id
             JOIN exam_papers AS ep ON ep.id = ri.exam_paper_id
             LEFT JOIN exam_sessions AS es ON es.id = ri.exam_session_id
@@ -631,13 +682,15 @@ class RecruitmentRepository:
             SELECT ri.id, ri.job_posting_id, ri.company_id, ri.candidate_id,
                    ri.exam_paper_id, ri.exam_session_id, ri.status,
                    ri.invited_at, ri.responded_at, ri.expires_at,
-                   jp.title AS job_title, ep.title AS exam_title,
-                   ep.duration_min, company.full_name AS company_name,
-                   es.status AS exam_status, es.started_at
+                   COALESCE(cp.company_name, company.full_name) AS company_name,
+                   jp.title AS position_title, ep.title AS exam_title,
+                   ep.duration_min, es.status AS session_status,
+                   es.scheduled_at, es.started_at
             FROM recruitment_invitations AS ri
             JOIN job_postings AS jp ON jp.id = ri.job_posting_id
             JOIN exam_papers AS ep ON ep.id = ri.exam_paper_id
             JOIN users AS company ON company.id = ri.company_id
+            LEFT JOIN company_profiles AS cp ON cp.user_id = ri.company_id
             LEFT JOIN exam_sessions AS es ON es.id = ri.exam_session_id
             WHERE ri.candidate_id = ?
             ORDER BY ri.invited_at DESC, ri.id DESC
@@ -687,14 +740,16 @@ class RecruitmentRepository:
                 """
                 SELECT epq.exam_paper_id, qb.id, qb.skill_id, qb.title, qb.content,
                        qb.question_type, qb.difficulty,
-                       COALESCE(epq.points, qb.points) AS points,
-                       epq.sort_order
+                       COALESCE(epq.points, qb.points) AS points, epq.sort_order,
+                       ea.selected_option_id
                 FROM exam_paper_questions AS epq
                 JOIN question_bank AS qb ON qb.id = epq.question_id
+                LEFT JOIN exam_answers AS ea
+                  ON ea.exam_session_id = ? AND ea.question_id = qb.id
                 WHERE epq.exam_paper_id = ?
                 ORDER BY epq.sort_order, epq.id
                 """,
-                (session["exam_paper_id"],),
+                (session_id, session["exam_paper_id"]),
             ).fetchall()
             questions: list[Record] = []
             for row in rows:

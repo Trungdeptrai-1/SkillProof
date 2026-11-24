@@ -57,6 +57,8 @@ class ExamModel(Protocol):
 
     def list_exams_for_company(self, company_id: int) -> Sequence[Record]: ...
 
+    def list_contracted_experts(self, company_id: int) -> Sequence[Record]: ...
+
     def add_question(
         self,
         company_id: int,
@@ -67,6 +69,7 @@ class ExamModel(Protocol):
         difficulty: str,
         points: float,
         options: Sequence[ExamOption],
+        expert_id: int | None = None,
     ) -> Record | None: ...
 
     def get_user_role(self, user_id: int) -> str | None: ...
@@ -211,6 +214,7 @@ class ExamResult:
         invitations: Sequence[Record] | None = None,
         questions: Sequence[Record] | None = None,
         submissions: Sequence[Record] | None = None,
+        experts: Sequence[Record] | None = None,
         answer: Record | None = None,
         result: Record | None = None,
         score: float | None = None,
@@ -224,6 +228,7 @@ class ExamResult:
         self.invitations = list(invitations) if invitations is not None else []
         self.questions = list(questions) if questions is not None else []
         self.submissions = list(submissions) if submissions is not None else []
+        self.experts = list(experts) if experts is not None else []
         self.answer = answer
         self.result = result
         self.score = score
@@ -253,7 +258,6 @@ class ExamService:
             "results",
             "results_released",
             "score",
-            "selected_option_id",
             "total_score",
         }
     )
@@ -401,6 +405,17 @@ class ExamService:
             return ExamResult(ExamResult.DB_ERROR)
         return ExamResult(ExamResult.SUCCESS, exams=exams)
 
+    def list_contracted_experts(self) -> ExamResult:
+        company_id = self._user_id_for_role("company")
+        if isinstance(company_id, ExamResult):
+            return company_id
+        try:
+            experts = self._model.list_contracted_experts(company_id)
+        except sqlite3.Error as exc:
+            logger.error("Database error listing contracted experts: %s", exc)
+            return ExamResult(ExamResult.DB_ERROR)
+        return ExamResult(ExamResult.SUCCESS, experts=experts)
+
     def publish_exam(self, exam_id: int) -> ExamResult:
         company_id = self._user_id_for_role("company")
         if isinstance(company_id, ExamResult):
@@ -429,6 +444,7 @@ class ExamService:
         options: Sequence[ExamOption],
         points: int | float = 10,
         difficulty: str = "medium",
+        expert_id: int | None = None,
     ) -> ExamResult:
         company_id = self._user_id_for_role("company")
         if isinstance(company_id, ExamResult):
@@ -443,6 +459,8 @@ class ExamService:
             return ExamResult(ExamResult.INVALID_INPUT)
         if not self._valid_points(points):
             return ExamResult(ExamResult.INVALID_POINTS)
+        if expert_id is not None and not self._valid_id(expert_id):
+            return ExamResult(ExamResult.INVALID_INPUT)
         valid_options = self._validate_options(options)
         if valid_options is None:
             return ExamResult(ExamResult.INVALID_OPTIONS)
@@ -461,6 +479,7 @@ class ExamService:
                 difficulty=difficulty,
                 points=float(points),
                 options=valid_options,
+                expert_id=expert_id,
             )
         except sqlite3.Error as exc:
             logger.error("Database error adding exam question: %s", exc)
@@ -810,9 +829,7 @@ class ExamService:
             return ExamResult(ExamResult.DB_ERROR)
         return ExamResult(
             ExamResult.SUCCESS,
-            result=submission,
-            score=score,
-            max_score=max_score,
+            result={"status": "submitted"},
         )
 
     @classmethod

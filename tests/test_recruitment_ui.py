@@ -22,6 +22,7 @@ from client.views.recruitment_contracts import (
     ListResult,
     Position,
     QuestionDraft,
+    QuestionAuthor,
     SubmitResult,
 )
 
@@ -34,10 +35,20 @@ def qt_app():
 class CompanyRecruitmentMock:
     def __init__(self):
         self.positions = [
-            Position(3, "Python Developer", "Hanoi", "full_time", "open", "API role")
+            Position(
+                3,
+                "Python Developer",
+                "Hanoi",
+                "published",
+                "API role",
+                "Python",
+            )
         ]
         self.assessments = [Assessment(5, "Python Basics", 30, 2)]
         self.candidates = [Candidate(8, "Candidate QA", "candidate@example.test")]
+        self.question_authors = [
+            QuestionAuthor(77, "Expert QA", "expert@example.test")
+        ]
         self.results = [
             AssessmentResultRow(
                 "Candidate QA",
@@ -45,40 +56,48 @@ class CompanyRecruitmentMock:
                 "Python Basics",
                 8,
                 10,
-                "completed",
+                "graded",
                 "2026-11-23 10:00",
+                exam_id=5,
+                invitation_id=41,
             )
         ]
         self.created_positions = []
         self.updated_positions = []
         self.created_assessments = []
         self.invitations = []
+        self.released_exams = []
 
     def list_positions(self):
         return ListResult(True, tuple(self.positions))
 
-    def create_position(self, title, description, location, employment_type):
+    def create_position(
+        self, title, description, requirements, location, status
+    ):
         self.created_positions.append(
-            (title, description, location, employment_type)
+            (title, description, requirements, location, status)
         )
         return ActionResult(True)
 
     def update_position(
-        self, position_id, title, description, location, employment_type
+        self, position_id, title, description, requirements, location, status
     ):
         self.updated_positions.append(
-            (position_id, title, description, location, employment_type)
+            (position_id, title, description, requirements, location, status)
         )
         return ActionResult(True)
 
     def list_assessments(self):
         return ListResult(True, tuple(self.assessments))
 
+    def list_contracted_experts(self):
+        return ListResult(True, tuple(self.question_authors))
+
     def create_assessment(
-        self, title, description, duration_minutes, questions
+        self, title, description, duration_minutes, questions, *, expert_id
     ):
         self.created_assessments.append(
-            (title, description, duration_minutes, questions)
+            (title, description, duration_minutes, questions, expert_id)
         )
         return ActionResult(True)
 
@@ -97,6 +116,10 @@ class CompanyRecruitmentMock:
 
     def list_results(self):
         return ListResult(True, tuple(self.results))
+
+    def release_results(self, exam_id):
+        self.released_exams.append(exam_id)
+        return ActionResult(True)
 
 
 class CandidateAssessmentMock:
@@ -189,7 +212,7 @@ def test_company_recruitment_views_validate_and_call_controller(qt_app):
     screen._position_title.setText("Senior Python Developer")
     screen._position_save.click()
     assert controller.updated_positions == [
-        (3, "Senior Python Developer", "API role", "Hanoi", "full_time")
+        (3, "Senior Python Developer", "API role", "Python", "Hanoi", "published")
     ]
 
     screen._position_title.setText("")
@@ -199,9 +222,13 @@ def test_company_recruitment_views_validate_and_call_controller(qt_app):
     screen._position_title.setText("Data Analyst")
     screen._position_location.setText("Remote")
     screen._position_description.setPlainText("Analytics role")
+    screen._position_requirements.setPlainText("SQL")
+    screen._position_status.setCurrentIndex(
+        screen._position_status.findData("published")
+    )
     screen._position_save.click()
     assert controller.created_positions == [
-        ("Data Analyst", "Analytics role", "Remote", "full_time")
+        ("Data Analyst", "Analytics role", "SQL", "Remote", "published")
     ]
 
     screen._question_prompt.setText("Which type is immutable?")
@@ -218,6 +245,7 @@ def test_company_recruitment_views_validate_and_call_controller(qt_app):
             "",
             60,
             (QuestionDraft("Which type is immutable?", ("list", "tuple"), 1),),
+            77,
         )
     ]
 
@@ -227,6 +255,10 @@ def test_company_recruitment_views_validate_and_call_controller(qt_app):
     screen._send_invitation.click()
     assert controller.invitations == [(3, 5, 8)]
     assert screen._candidates_status.text() == "Đã tìm thấy 1 ứng viên."
+    screen._results_table.selectRow(0)
+    assert screen._results_release.isEnabled()
+    screen._results_release.click()
+    assert controller.released_exams == [5]
     screen.deleteLater()
 
 
@@ -256,6 +288,18 @@ def test_company_controller_errors_empty_and_unavailable_states(qt_app):
     assert "Assessment API unavailable" in screen._status.text()
     screen.deleteLater()
     unavailable.deleteLater()
+
+
+def test_company_cannot_create_exam_without_contracted_question_author(qt_app):
+    class NoContractedExperts(CompanyRecruitmentMock):
+        def list_contracted_experts(self):
+            return ListResult(True)
+
+    screen = CompanyRecruitmentScreen(NoContractedExperts())
+
+    assert not screen._assessment_create.isEnabled()
+    assert "Chưa có Expert" in screen._question_author_status.text()
+    screen.deleteLater()
 
 
 def test_candidate_saves_answers_confirms_and_prevents_duplicate_submission(
@@ -425,4 +469,43 @@ def test_main_window_routes_recruitment_views_by_role(
         assert window._candidate_assessments is screen
         screen._invitations_table.selectRow(0)
         assert not screen._start_exam_button.isEnabled()
+    window.close()
+
+
+def test_main_window_uses_real_recruitment_adapters_by_default(
+    fresh_db, auth, qt_app, monkeypatch
+):
+    import app.database.schema as schema
+    from app.integration.recruitment_adapters import (
+        CandidateAssessmentAdapter,
+        CompanyRecruitmentAdapter,
+    )
+    from app.ui.main_window import MainWindow
+    from app.utils.helpers import hash_password
+
+    monkeypatch.setattr(schema, "is_first_run", lambda: False)
+    email = "default-company@recruitment.example.test"
+    password = "RecruitmentPass1"
+    fresh_db.execute(
+        """
+        INSERT INTO users(username,email,password,full_name,role,is_active)
+        VALUES(?,?,?,?,?,1)
+        """,
+        ("default-company", email, hash_password(password), "Default Company", "company"),
+    )
+    login = auth.login(email, password)
+    assert login.success
+
+    window = MainWindow()
+    assert isinstance(
+        window._company_recruitment_controller, CompanyRecruitmentAdapter
+    )
+    assert isinstance(
+        window._candidate_assessment_controller, CandidateAssessmentAdapter
+    )
+    window._show_dashboard(login.user)
+    _button(window._dashboard, "Tuyển dụng & đánh giá").click()
+    assert window._company_recruitment is not None
+    assert window._company_recruitment._position_save.isEnabled()
+    assert window._company_recruitment._positions_table.rowCount() == 0
     window.close()

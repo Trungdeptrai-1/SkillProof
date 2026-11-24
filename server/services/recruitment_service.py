@@ -47,6 +47,10 @@ class RecruitmentModel(Protocol):
 
     def list_job_postings(self, company_id: int) -> Sequence[Record]: ...
 
+    def list_candidates(
+        self, company_id: int, search: str = ""
+    ) -> Sequence[Record]: ...
+
 
 class RecruitmentResult:
     SUCCESS = "success"
@@ -75,10 +79,12 @@ class RecruitmentResult:
         *,
         position: Record | None = None,
         positions: Sequence[Record] | None = None,
+        candidates: Sequence[Record] | None = None,
     ) -> None:
         self.status = status
         self.position = position
         self.positions = list(positions) if positions is not None else []
+        self.candidates = list(candidates) if candidates is not None else []
         self.success = status == self.SUCCESS
         self.message = self.MESSAGES.get(status, "Đã xảy ra lỗi không xác định.")
 
@@ -231,4 +237,20 @@ class RecruitmentService:
         return RecruitmentResult(
             RecruitmentResult.SUCCESS,
             positions=positions,
+        )
+
+    def list_candidates(self, search: str = "") -> RecruitmentResult:
+        company_id = self._company_id()
+        if isinstance(company_id, RecruitmentResult):
+            return company_id
+        if not isinstance(search, str):
+            return RecruitmentResult(RecruitmentResult.INVALID_INPUT)
+        try:
+            candidates = self._model.list_candidates(company_id, search.strip())
+        except sqlite3.Error as exc:
+            logger.error("Database error listing candidates: %s", exc)
+            return RecruitmentResult(RecruitmentResult.DB_ERROR)
+        return RecruitmentResult(
+            RecruitmentResult.SUCCESS,
+            candidates=candidates,
         )
