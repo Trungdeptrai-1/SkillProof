@@ -120,6 +120,18 @@ class ExamMonitorControllerMock:
     def get_active_session(self):
         return ActiveExamSession(9, "Assessment QA", "in_progress", 125)
 
+    def start_monitoring(self, session_id):
+        return WorkflowActionResult(True, "Started")
+
+    def record_focus_lost(self, session_id):
+        return WorkflowActionResult(True, "Recorded")
+
+    def record_timeout(self, session_id):
+        return WorkflowActionResult(True, "Timeout")
+
+    def stop_monitoring(self, session_id):
+        return WorkflowActionResult(True, "Stopped")
+
 
 class InterviewControllerMock:
     def __init__(self):
@@ -134,15 +146,38 @@ class InterviewControllerMock:
                     "Technical interview",
                     "Candidate QA",
                     "2026-11-25 10:00",
-                    "scheduled",
+                    "in_progress",
                     "https://meet.example.test/session",
                 ),
             ),
         )
 
-    def save_evaluation(self, interview_id, notes):
-        self.saved.append((interview_id, notes))
+    def save_evaluation(
+        self,
+        interview_id,
+        notes,
+        technical_score=3,
+        communication_score=3,
+        problem_solving_score=3,
+        overall_rating=3,
+    ):
+        self.saved.append(
+            (
+                interview_id,
+                notes,
+                technical_score,
+                communication_score,
+                problem_solving_score,
+                overall_rating,
+            )
+        )
         return WorkflowActionResult(True, "Saved")
+
+    def schedule_interview(self, candidate_id, title, scheduled_at, expert_ids=()):
+        return WorkflowActionResult(True, "Scheduled")
+
+    def update_status(self, interview_id, status):
+        return WorkflowActionResult(True, "Updated")
 
 
 class CertificateControllerMock:
@@ -244,13 +279,20 @@ def test_manual_grading_saves_and_releases_only_after_grade(qt_app, monkeypatch)
     screen.close()
 
 
-def test_exam_monitor_only_tracks_controller_confirmed_active_session(qt_app):
+def test_exam_monitor_only_tracks_controller_confirmed_active_session(
+    qt_app, monkeypatch
+):
     unavailable = ExamMonitorScreen()
     assert "Không có giám sát nào được bật" in unavailable._status.text()
     assert not unavailable._start_button.isEnabled()
 
     screen = ExamMonitorScreen(ExamMonitorControllerMock())
     assert screen._countdown.text() == "02:05"
+    monkeypatch.setattr(
+        QMessageBox,
+        "question",
+        lambda *args, **kwargs: QMessageBox.StandardButton.Yes,
+    )
     screen._start_button.click()
     assert screen._monitoring
     screen.eventFilter(qt_app, QEvent(QEvent.Type.ApplicationDeactivate))
@@ -269,7 +311,7 @@ def test_interview_screen_loads_external_link_and_saves_notes(qt_app):
     assert "https://meet.example.test/session" in screen._meeting_link.text()
     screen._evaluation_notes.setPlainText("Strong communication.")
     screen._save_button.click()
-    assert controller.saved == [(7, "Strong communication.")]
+    assert controller.saved == [(7, "Strong communication.", 3, 3, 3, 3)]
 
     candidate_view = InterviewScreen("candidate", controller)
     assert candidate_view._evaluation_notes.isHidden()
@@ -323,7 +365,8 @@ def test_candidate_dashboard_navigates_to_extended_screens_with_unavailable_stat
     )
     assessment_button.click()
     assert window._stack.currentWidget() is window._candidate_special_assessments
-    assert "Chưa có Candidate Controller" in window._candidate_special_assessments._status.text()
+    assert window._candidate_specialized_assessment_controller is not None
+    assert window._candidate_special_assessments._assignments_table.rowCount() == 0
     window._candidate_special_assessments._back_button.click()
     assert window._stack.currentWidget() is dashboard
 
@@ -383,8 +426,8 @@ def test_admin_dashboard_navigates_to_locked_certificate_management(
     window._show_dashboard(login_result.user)
     window._dashboard._certificates_nav_button.click()
     assert window._stack.currentWidget() is window._certificate_screen
-    assert "Chưa có Certificate Controller" in window._certificate_screen._status.text()
-    assert not window._certificate_screen._issue_button.isEnabled()
+    assert window._certificate_controller is not None
+    assert window._certificate_screen._issue_button.isEnabled()
     window._certificate_screen._back_button.click()
     assert window._stack.currentWidget() is window._dashboard
     auth.logout()

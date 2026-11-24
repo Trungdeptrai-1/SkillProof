@@ -189,9 +189,14 @@ class CompanyRecruitmentScreen(QWidget):
         self._assessment_duration = QSpinBox()
         self._assessment_duration.setRange(1, 600)
         self._assessment_duration.setValue(60)
+        self._assessment_skill = QComboBox()
+        self._assessment_skill.addItem(
+            "Không gắn kỹ năng — không đủ điều kiện cấp chứng chỉ", None
+        )
         form.addRow("Tên bài thi *", self._assessment_title)
         form.addRow("Mô tả", self._assessment_description)
         form.addRow("Thời lượng (phút)", self._assessment_duration)
+        form.addRow("Kỹ năng đánh giá", self._assessment_skill)
         self._question_author = QComboBox()
         self._question_author_status = StatusBanner(tab)
         form.addRow("Expert soạn câu hỏi *", self._question_author)
@@ -345,6 +350,7 @@ class CompanyRecruitmentScreen(QWidget):
             self._assessment_title,
             self._assessment_description,
             self._assessment_duration,
+            self._assessment_skill,
             self._question_author,
             self._question_author_status,
             self._question_prompt,
@@ -377,6 +383,7 @@ class CompanyRecruitmentScreen(QWidget):
             for message in (
                 self._load_positions(),
                 self._load_assessments(),
+                self._load_skills(),
                 self._load_contracted_experts(),
                 self._load_candidates(),
                 self._load_results(),
@@ -410,6 +417,25 @@ class CompanyRecruitmentScreen(QWidget):
             else f"Đã tải {len(self._positions)} vị trí.",
             "empty" if not self._positions else "success",
         )
+        return ""
+
+    def _load_skills(self) -> str:
+        list_skills = getattr(self._controller, "list_skills", None)
+        if not callable(list_skills):
+            return ""
+        result = list_skills()
+        if not result.success:
+            self._assessment_skill.clear()
+            self._assessment_skill.addItem(
+                "Không gắn kỹ năng — kho kỹ năng chưa sẵn sàng", None
+            )
+            return result.message or "Không thể tải danh sách kỹ năng."
+        self._assessment_skill.clear()
+        self._assessment_skill.addItem(
+            "Không gắn kỹ năng — không đủ điều kiện cấp chứng chỉ", None
+        )
+        for skill in result.items:
+            self._assessment_skill.addItem(skill.name, skill.id)
         return ""
 
     def _load_assessments(self) -> str:
@@ -835,12 +861,18 @@ class CompanyRecruitmentScreen(QWidget):
             self._status.set_status("Thêm ít nhất một câu hỏi trước khi lưu.", "error")
             return
         self._status.set_status("Đang tạo bài thi...", "loading")
+        skill_id = self._assessment_skill.currentData()
+        assessment_args = {
+            "expert_id": expert_id,
+        }
+        if isinstance(skill_id, int) and not isinstance(skill_id, bool):
+            assessment_args["skill_id"] = skill_id
         result = self._controller.create_assessment(
             title,
             self._assessment_description.toPlainText().strip(),
             self._assessment_duration.value(),
             tuple(self._question_drafts),
-            expert_id=expert_id,
+            **assessment_args,
         )
         if not result.success:
             self._status.set_status(result.message or "Không thể tạo bài thi.", "error")

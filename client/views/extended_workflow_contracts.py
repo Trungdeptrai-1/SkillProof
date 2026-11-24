@@ -103,10 +103,17 @@ class ActiveExamSession:
 
 
 class ExamMonitorController(Protocol):
-    """API to resolve the authenticated user's active exam session."""
+    """Resolve active sessions and persist explicitly disclosed focus events."""
 
     def get_active_session(self) -> ActiveExamSession | None: ...
 
+    def start_monitoring(self, session_id: int) -> WorkflowActionResult: ...
+
+    def record_focus_lost(self, session_id: int) -> WorkflowActionResult: ...
+
+    def record_timeout(self, session_id: int) -> WorkflowActionResult: ...
+
+    def stop_monitoring(self, session_id: int) -> WorkflowActionResult: ...
 
 @dataclass(frozen=True)
 class InterviewEntry:
@@ -125,8 +132,24 @@ class InterviewController(Protocol):
     def list_interviews(self) -> WorkflowListResult[InterviewEntry]: ...
 
     def save_evaluation(
-        self, interview_id: int, notes: str
+        self,
+        interview_id: int,
+        notes: str,
+        technical_score: int = 3,
+        communication_score: int = 3,
+        problem_solving_score: int = 3,
+        overall_rating: int = 3,
     ) -> WorkflowActionResult: ...
+
+    def schedule_interview(
+        self,
+        candidate_id: int,
+        title: str,
+        scheduled_at: str,
+        expert_ids: tuple[int, ...] = (),
+    ) -> WorkflowActionResult: ...
+
+    def update_status(self, interview_id: int, status: str) -> WorkflowActionResult: ...
 
 
 @dataclass(frozen=True)
@@ -166,3 +189,5 @@ class CertificateController(Protocol):
     ) -> WorkflowActionResult: ...
 
     def verify_certificate(self, cert_code: str) -> CertificateVerification: ...
+
+    def revoke_certificate(self, certificate_id: int) -> WorkflowActionResult: ...

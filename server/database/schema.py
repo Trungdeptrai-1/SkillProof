@@ -146,6 +146,7 @@ def _apply_migrations(conn: sqlite3.Connection) -> None:
     _mig_006_create_recruitment_workflow(conn)
     _mig_007_complete_assessment_data(conn)
     _mig_008_complete_feature_persistence(conn)
+    _mig_009_approved_assessment_sources(conn)
 
 
 # ── MIG-001 ───────────────────────────────────────────────────────────────────
@@ -1518,6 +1519,38 @@ def _mig_008_complete_feature_persistence(conn: sqlite3.Connection) -> None:
     )
     conn.commit()
     logger.info("MIG-008: coding, grading, proctoring, and review data are ready.")
+
+
+def _mig_009_approved_assessment_sources(conn: sqlite3.Connection) -> None:
+    """MIG-009: Link approved certificate sources to released exam results."""
+    columns = {
+        row["name"] for row in conn.execute("PRAGMA table_info(assessments)")
+    }
+    additions = {
+        "status": (
+            "TEXT NOT NULL DEFAULT 'pending' "
+            "CHECK(status IN ('pending','approved','rejected'))"
+        ),
+        "approved_by": "INTEGER REFERENCES users(id) ON DELETE SET NULL",
+        "approved_at": "TEXT",
+        "source_exam_session_id": (
+            "INTEGER REFERENCES exam_sessions(id) ON DELETE SET NULL"
+        ),
+    }
+    for column, definition in additions.items():
+        if column not in columns:
+            conn.execute(f"ALTER TABLE assessments ADD COLUMN {column} {definition}")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_assessments_approved_source "
+        "ON assessments(user_id, skill_id, status, taken_at)"
+    )
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_assessments_source_session "
+        "ON assessments(source_exam_session_id) "
+        "WHERE source_exam_session_id IS NOT NULL"
+    )
+    conn.commit()
+    logger.info("MIG-009: approved assessment sources are ready.")
 
 
 # ── Tiện ích ──────────────────────────────────────────────────────────────────

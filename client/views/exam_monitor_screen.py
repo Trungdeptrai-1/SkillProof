@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
     QApplication,
     QHBoxLayout,
     QLabel,
+    QMessageBox,
     QPushButton,
     QTableWidget,
     QTableWidgetItem,
@@ -109,8 +110,8 @@ class ExamMonitorScreen(QWidget):
         layout.addWidget(self._camera_status)
         self._camera_status.hide()
         self._local_notice = QLabel(
-            "Cảnh báo rời ứng dụng chỉ được ghi nhận tại cửa sổ này; "
-            "chưa được gửi hoặc lưu trên máy chủ."
+            "Khi bạn xác nhận bật theo dõi, sự kiện mất focus sẽ được lưu vào "
+            "SQLite cùng phiên thi. Không ghi hình, thu âm hoặc chụp màn hình."
         )
         self._local_notice.setWordWrap(True)
         self._local_notice.setStyleSheet(f"color:{COLOR_TEXT_MUTED};")
@@ -167,6 +168,22 @@ class ExamMonitorScreen(QWidget):
             or self._application is None
         ):
             return
+        confirmation = QMessageBox.question(
+            self,
+            "Lưu sự kiện focus",
+            "Ứng dụng sẽ ghi thời điểm cửa sổ mất focus vào SQLite cùng phiên "
+            "thi. Không sử dụng camera, video hoặc ảnh bằng chứng. Tiếp tục?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if confirmation != QMessageBox.StandardButton.Yes:
+            return
+        started = self._controller.start_monitoring(self._session.id)
+        if not started.success:
+            self._status.set_status(
+                started.message or "Không thể bắt đầu ghi nhận focus.", "error"
+            )
+            return
         self._monitoring = True
         self._monitoring_started = True
         self._last_tick = time.monotonic()
@@ -190,6 +207,10 @@ class ExamMonitorScreen(QWidget):
         self._remaining_seconds = max(0, self._remaining_seconds - elapsed)
         self._update_countdown()
         if self._remaining_seconds == 0:
+            if self._controller is not None and self._session is not None:
+                timeout = self._controller.record_timeout(self._session.id)
+                if not timeout.success:
+                    self._status.set_status(timeout.message, "error")
             self._stop_monitoring()
             self._status.set_status(
                 "Đã hết thời gian theo dõi cục bộ. Hãy kiểm tra trạng thái nộp "
@@ -212,6 +233,14 @@ class ExamMonitorScreen(QWidget):
     def _record_focus_alert(self) -> None:
         if not self._monitoring:
             return
+        if self._controller is None or self._session is None:
+            return
+        result = self._controller.record_focus_lost(self._session.id)
+        if not result.success:
+            self._status.set_status(
+                result.message or "Không thể lưu sự kiện focus vào SQLite.", "error"
+            )
+            return
         row = self._alerts_table.rowCount()
         self._alerts_table.insertRow(row)
         timestamp = QDateTime.currentDateTime().toString("yyyy-MM-dd HH:mm:ss")
@@ -220,15 +249,27 @@ class ExamMonitorScreen(QWidget):
             row, 1, QTableWidgetItem("Ứng dụng mất focus hoặc bị thu nhỏ")
         )
         self._status.set_status(
-            "Phát hiện ứng dụng mất focus. Cảnh báo chỉ lưu trong cửa sổ hiện tại.",
+            "Sự kiện mất focus đã được lưu vào SQLite.",
             "error",
         )
 
-    def _stop_monitoring(self) -> None:
+    def _stop_monitoring(self, *, finish_session: bool = True) -> None:
+        was_monitoring = self._monitoring
         if self._monitoring and self._application is not None:
             self._application.removeEventFilter(self)
         self._timer.stop()
         self._monitoring = False
+        if (
+            was_monitoring
+            and finish_session
+            and self._controller is not None
+            and self._session is not None
+        ):
+            result = self._controller.stop_monitoring(self._session.id)
+            if not result.success:
+                self._status.set_status(
+                    result.message or "Không thể kết thúc phiên giám sát.", "error"
+                )
         self._stop_button.setEnabled(False)
         self._refresh_button.setEnabled(self._controller is not None)
         if not self._monitoring_started:
@@ -243,10 +284,10 @@ class ExamMonitorScreen(QWidget):
         )
 
     def hideEvent(self, event):  # noqa: N802
-        self._stop_monitoring()
+        self._stop_monitoring(finish_session=False)
         super().hideEvent(event)
 
     def _handle_back(self) -> None:
-        self._stop_monitoring()
+        self._stop_monitoring(finish_session=False)
         if self._on_back_cb is not None:
             self._on_back_cb()

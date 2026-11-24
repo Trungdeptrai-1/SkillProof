@@ -55,6 +55,7 @@ class ManualAssessmentModel(Protocol):
         *,
         answer_text: str | None,
         answer_code: str | None,
+        programming_language: str | None = None,
     ) -> Record | None: ...
 
     def submit_manual_session_once(
@@ -305,8 +306,10 @@ class ManualAssessmentService:
         safe_questions = []
         for question in questions:
             question_type = question.get("question_type")
-            if question_type not in MANUAL_QUESTION_TYPES:
+            if question_type not in MANUAL_QUESTION_TYPES | {"multiple_choice"}:
                 return self._result(self.UNSUPPORTED_QUESTION)
+            if question_type not in MANUAL_QUESTION_TYPES:
+                continue
             safe_questions.append(
                 {
                     key: value
@@ -320,6 +323,8 @@ class ManualAssessmentService:
                     }
                 }
             )
+        if not safe_questions:
+            return self._result(self.UNSUPPORTED_QUESTION)
         return self._result(self.SUCCESS, records=safe_questions)
 
     def save_response(
@@ -329,6 +334,7 @@ class ManualAssessmentService:
         *,
         answer_text: str | None = None,
         answer_code: str | None = None,
+        programming_language: str | None = None,
     ) -> WorkflowResult:
         identity = self._identity({"candidate"})
         if isinstance(identity, WorkflowResult):
@@ -366,14 +372,37 @@ class ManualAssessmentService:
                 or not payload.strip()
                 or len(payload) > MAX_RESPONSE_LENGTH
                 or other_payload is not None
+                or (
+                    programming_language is not None
+                    and not isinstance(programming_language, str)
+                )
             ):
                 return self._result(self.INVALID_INPUT)
+            if question_type == "essay" and programming_language is not None:
+                return self._result(self.INVALID_INPUT)
+            if question_type == "coding":
+                if "supported_languages" in question:
+                    languages = question.get("supported_languages")
+                    if isinstance(languages, str):
+                        languages = (languages,)
+                    if (
+                        not isinstance(languages, Sequence)
+                        or isinstance(languages, (str, bytes))
+                        or not languages
+                        or (
+                            programming_language is not None
+                            and programming_language not in languages
+                        )
+                    ):
+                        return self._result(self.INVALID_INPUT)
+            arguments = {
+                "answer_text": payload if question_type == "essay" else None,
+                "answer_code": payload if question_type == "coding" else None,
+            }
+            if programming_language is not None:
+                arguments["programming_language"] = programming_language
             record = self._model.save_candidate_response(
-                session_id,
-                identity[0],
-                question_id,
-                answer_text=payload if question_type == "essay" else None,
-                answer_code=payload if question_type == "coding" else None,
+                session_id, identity[0], question_id, **arguments
             )
         except sqlite3.Error:
             logger.exception("Could not save manual assessment response")
@@ -393,9 +422,17 @@ class ManualAssessmentService:
             if session.get("status") != "in_progress":
                 return self._result(self.ALREADY_SUBMITTED)
             questions = self._model.list_candidate_questions(session_id, identity[0])
-            if not questions or any(
-                question.get("question_type") not in MANUAL_QUESTION_TYPES
-                for question in questions
+            if (
+                not questions
+                or not any(
+                    question.get("question_type") in MANUAL_QUESTION_TYPES
+                    for question in questions
+                )
+                or any(
+                    question.get("question_type")
+                    not in MANUAL_QUESTION_TYPES | {"multiple_choice"}
+                    for question in questions
+                )
             ):
                 return self._result(self.UNSUPPORTED_QUESTION)
             record = self._model.submit_manual_session_once(session_id, identity[0])

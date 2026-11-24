@@ -21,6 +21,7 @@ from client.views.recruitment_contracts import (
     Position,
     QuestionDraft,
     QuestionAuthor,
+    SkillChoice,
     SubmitResult,
 )
 from server.controllers.exam_controller import ExamController
@@ -55,9 +56,11 @@ class CompanyRecruitmentAdapter:
         self,
         recruitment: RecruitmentController,
         exams: ExamController,
+        repository: RecruitmentRepository | None = None,
     ) -> None:
         self._recruitment = recruitment
         self._exams = exams
+        self._repository = repository
 
     def list_positions(self) -> ListResult[Position]:
         result = self._recruitment.list_positions()
@@ -132,10 +135,22 @@ class CompanyRecruitmentAdapter:
             question_count = _integer(row.get("question_count"))
             if None in (exam_id, title, duration, question_count):
                 return ListResult(False, message="Dữ liệu bài thi không đầy đủ.")
+            skill_id = _integer(row.get("skill_id"))
             assessments.append(
-                Assessment(exam_id, title, duration, question_count)
+                Assessment(exam_id, title, duration, question_count, skill_id)
             )
         return ListResult(True, tuple(assessments))
+
+    def list_skills(self) -> ListResult[SkillChoice]:
+        if self._repository is None:
+            return ListResult(False, message="Kho kỹ năng chưa được kết nối.")
+        return ListResult(
+            True,
+            tuple(
+                SkillChoice(int(row["id"]), str(row["name"]))
+                for row in self._repository.list_active_skills()
+            ),
+        )
 
     def create_assessment(
         self,
@@ -145,6 +160,7 @@ class CompanyRecruitmentAdapter:
         questions: tuple[QuestionDraft, ...],
         *,
         expert_id: int,
+        skill_id: int | None = None,
     ) -> ActionResult:
         if not questions:
             return ActionResult(False, "Thêm ít nhất một câu hỏi trước khi lưu.")
@@ -153,6 +169,7 @@ class CompanyRecruitmentAdapter:
             description,
             duration_minutes,
             total_points=10 * len(questions),
+            **({"skill_id": skill_id} if skill_id is not None else {}),
         )
         if not created.success:
             return ActionResult(False, created.message)
@@ -513,6 +530,6 @@ def create_recruitment_view_controllers() -> tuple[
     recruitment = RecruitmentController(RecruitmentService(repository))
     exam_service = ExamService(repository, repository)
     exams = ExamController(exam_service)
-    return CompanyRecruitmentAdapter(recruitment, exams), CandidateAssessmentAdapter(
-        exams
-    )
+    return CompanyRecruitmentAdapter(
+        recruitment, exams, repository
+    ), CandidateAssessmentAdapter(exams)

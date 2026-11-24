@@ -49,6 +49,7 @@ class ExamModel(Protocol):
         description: str,
         duration_min: int,
         total_points: float,
+        skill_id: int | None = None,
     ) -> Record | None: ...
 
     def get_exam_for_company(
@@ -347,6 +348,8 @@ class ExamService:
         description: str = "",
         duration_min: int = 60,
         total_points: int | float = 100,
+        *,
+        skill_id: int | None = None,
     ) -> ExamResult:
         company_id = self._user_id_for_role("company")
         if isinstance(company_id, ExamResult):
@@ -363,15 +366,19 @@ class ExamService:
             return ExamResult(ExamResult.INVALID_DURATION)
         if not self._valid_points(total_points):
             return ExamResult(ExamResult.INVALID_POINTS)
+        if skill_id is not None and not self._valid_id(skill_id):
+            return ExamResult(ExamResult.INVALID_INPUT)
 
         try:
-            exam = self._model.create_exam(
-                company_id,
-                title=title.strip(),
-                description=description.strip(),
-                duration_min=duration_min,
-                total_points=float(total_points),
-            )
+            values = {
+                "title": title.strip(),
+                "description": description.strip(),
+                "duration_min": duration_min,
+                "total_points": float(total_points),
+            }
+            if skill_id is not None:
+                values["skill_id"] = skill_id
+            exam = self._model.create_exam(company_id, **values)
         except sqlite3.Error as exc:
             logger.error("Database error creating exam: %s", exc)
             return ExamResult(ExamResult.DB_ERROR)
