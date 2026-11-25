@@ -372,16 +372,39 @@ class RecruitmentRepository:
                 dict(row)
                 for row in self._connection.execute(
                     """
-                    SELECT id, full_name, email
-                    FROM users
-                    WHERE role = 'candidate'
-                      AND is_active = 1
-                      AND COALESCE(is_deleted, 0) = 0
-                      AND (? = '%%' OR lower(full_name) LIKE lower(?)
-                           OR lower(email) LIKE lower(?))
-                    ORDER BY full_name, id
+                    SELECT u.id, u.full_name,
+                           CASE WHEN EXISTS (
+                               SELECT 1 FROM job_applications ja
+                               JOIN job_postings jp ON jp.id=ja.job_posting_id
+                               WHERE ja.candidate_id=u.id AND jp.company_id=?
+                                 AND ja.status<>'withdrawn'
+                           ) THEN u.email ELSE '' END AS email
+                    FROM users u
+                    LEFT JOIN candidate_profiles cp ON cp.user_id=u.id
+                    WHERE u.role = 'candidate'
+                      AND u.is_active = 1
+                      AND COALESCE(u.is_deleted, 0) = 0
+                      AND (
+                          COALESCE(cp.is_discoverable,0)=1
+                          OR EXISTS (
+                              SELECT 1 FROM job_applications ja
+                              JOIN job_postings jp ON jp.id=ja.job_posting_id
+                              WHERE ja.candidate_id=u.id AND jp.company_id=?
+                                AND ja.status<>'withdrawn'
+                          )
+                      )
+                      AND (
+                          ?='%%' OR lower(u.full_name) LIKE lower(?)
+                          OR (lower(u.email) LIKE lower(?) AND EXISTS (
+                              SELECT 1 FROM job_applications ja
+                              JOIN job_postings jp ON jp.id=ja.job_posting_id
+                              WHERE ja.candidate_id=u.id AND jp.company_id=?
+                                AND ja.status<>'withdrawn'
+                          ))
+                      )
+                    ORDER BY u.full_name, u.id
                     """,
-                    (needle, needle, needle),
+                    (company_id, company_id, needle, needle, needle, company_id),
                 ).fetchall()
             ]
 
