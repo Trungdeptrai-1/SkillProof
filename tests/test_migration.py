@@ -333,7 +333,8 @@ class TestCreateAllTables:
         assert recruitment_tables <= tables, "Thiếu bảng tuyển dụng (MIG-006)"
         assert {"job_applications", "saved_job_postings"} <= tables, "Thiếu bảng marketplace (MIG-011)"
         assert "direct_recruitment_invitations" in tables, "Thiếu bảng lời mời (MIG-012)"
-        assert len(tables) == 30, f"Expected 30, got {len(tables)}"
+        assert "application_interviews" in tables, "Thiếu bảng liên kết phỏng vấn (MIG-013)"
+        assert len(tables) == 31, f"Expected 31, got {len(tables)}"
 
     def test_legacy_db_full_migration(self, legacy_db):
         """
