@@ -56,6 +56,12 @@ def test_recruitment_exam_flow_uses_sqlite_and_releases_candidate_result(
         fresh_db, "other-candidate", "candidate"
     )
     _create_user(fresh_db, "recruitment-expert", "expert")
+    # The legacy Candidate picker must not enumerate private profiles.
+    fresh_db.execute(
+        """INSERT INTO candidate_profiles(user_id, is_discoverable)
+           SELECT id, 1 FROM users WHERE email=?""",
+        (candidate_email,),
+    )
     company_id = fresh_db.fetchone(
         "SELECT id FROM users WHERE email = ?", (company_email,)
     )["id"]
@@ -108,7 +114,8 @@ def test_recruitment_exam_flow_uses_sqlite_and_releases_candidate_result(
 
     candidates = company.list_candidates("recruitment-candidate")
     assert candidates.success
-    assert [item.email for item in candidates.items] == [candidate_email]
+    assert len(candidates.items) == 1
+    assert candidates.items[0].email == ""  # Opt-in alone never reveals contact email.
     invitation = company.send_invitation(
         position_id, exam_id, candidates.items[0].id
     )
@@ -180,3 +187,39 @@ def test_recruitment_exam_flow_uses_sqlite_and_releases_candidate_result(
     assert released.success and released.result is not None
     assert (released.result.score, released.result.max_score) == (10.0, 10.0)
     assert released.result.status == "released"
+
+def test_legacy_company_directory_respects_candidate_visibility_and_application(fresh_db):
+    company_email, _ = _create_user(fresh_db, "privacy-company", "company")
+    public_email, _ = _create_user(fresh_db, "privacy-public", "candidate")
+    private_email, _ = _create_user(fresh_db, "privacy-private", "candidate")
+    company_id = fresh_db.fetchone("SELECT id FROM users WHERE email=?", (company_email,))["id"]
+    public_id = fresh_db.fetchone("SELECT id FROM users WHERE email=?", (public_email,))["id"]
+    private_id = fresh_db.fetchone("SELECT id FROM users WHERE email=?", (private_email,))["id"]
+    fresh_db.execute(
+        "INSERT INTO candidate_profiles(user_id,is_discoverable) VALUES(?,1)",
+        (public_id,),
+    )
+    repo = RecruitmentRepository(fresh_db.get_connection())
+    rows = repo.list_candidates(company_id)
+    assert [row["id"] for row in rows] == [public_id]
+    assert rows[0]["email"] == ""
+    assert repo.list_candidates(company_id, private_email) == []
+
+    position_id = fresh_db.execute(
+        """INSERT INTO job_postings(company_id,title,status)
+           VALUES(?,'Python Developer','published')""",
+        (company_id,),
+    ).lastrowid
+    fresh_db.execute(
+        "INSERT INTO job_applications(job_posting_id,candidate_id) VALUES(?,?)",
+        (position_id, private_id),
+    )
+    rows = repo.list_candidates(company_id)
+    assert {row["id"] for row in rows} == {public_id, private_id}
+    assert next(row["email"] for row in rows if row["id"] == private_id) == private_email
+    fresh_db.execute(
+        """UPDATE job_applications SET status='withdrawn'
+           WHERE job_posting_id=? AND candidate_id=?""",
+        (position_id, private_id),
+    )
+    assert {row["id"] for row in repo.list_candidates(company_id)} == {public_id}
