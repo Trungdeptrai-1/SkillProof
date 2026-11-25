@@ -216,7 +216,6 @@ class MarketplaceScreen(QWidget):
         self.stage = QComboBox()
         self.stage.addItem("Đang xem xét", "reviewing")
         self.stage.addItem("Vào danh sách chọn", "shortlisted")
-        self.stage.addItem("Mời đánh giá", "assessment")
         self.stage.addItem("Đề nghị tuyển dụng", "offered")
         self.stage.addItem("Từ chối", "rejected")
         actions.addWidget(self.stage)
