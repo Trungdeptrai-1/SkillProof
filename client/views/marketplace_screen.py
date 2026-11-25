@@ -424,6 +424,14 @@ class MarketplaceScreen(QWidget):
         if self._result(self.invitation_controller.respond(invite_id, accepted),
                         "Đã phản hồi lời mời."):
             self._load_received_invites()
+            if accepted:
+                self._load_applications()
+                self.status.setText(
+                    "Đã chấp nhận lời mời. Vị trí đã được thêm vào "
+                    "'Đơn ứng tuyển của tôi'; doanh nghiệp có thể xử lý hồ sơ."
+                )
+            else:
+                self.status.setText("Đã từ chối lời mời tuyển dụng.")
 
     def _invite_selected_candidate(self) -> None:
         candidate_id = selected_id(self.talent_table)
