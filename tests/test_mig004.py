@@ -71,7 +71,7 @@ class TestMig004CreatesTables:
                 "AND name NOT LIKE 'sqlite_%'"
             ).fetchall()
         ]
-        assert len(tables) == 30, f"Expected 30 tables, got {len(tables)}: {tables}"
+        assert len(tables) == 31, f"Expected 31 tables, got {len(tables)}: {tables}"
 
     @pytest.mark.parametrize("table_name", EXPECTED_NEW_TABLES)
     def test_each_table_exists(self, fresh_db, table_name):
@@ -111,7 +111,7 @@ class TestMig004Idempotent:
             "SELECT COUNT(*) FROM sqlite_master WHERE type='table' "
             "AND name NOT LIKE 'sqlite_%'"
         ).fetchone()[0]
-        assert count == 30
+        assert count == 31
 
     def test_create_all_tables_includes_mig004(self, fresh_db):
         """create_all_tables() phải chạy MIG-004 tự động."""
