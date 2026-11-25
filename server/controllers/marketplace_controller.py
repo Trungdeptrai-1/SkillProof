@@ -60,3 +60,8 @@ class MarketplaceController:
         return self._service.schedule_application_interview(
             application_id, title, scheduled_at, description, duration_min, meeting_url
         )
+
+    def decide_after_interview(
+        self, application_id: int, decision: str, note: str = ""
+    ) -> MarketplaceResult:
+        return self._service.decide_after_interview(application_id, decision, note)
