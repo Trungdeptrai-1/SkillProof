@@ -198,6 +198,74 @@ class MarketplaceService:
             logger.exception("Unable to hand off application to assessment")
             return MarketplaceResult("db_error")
 
+    def schedule_application_interview(
+        self, application_id: int, title: str, scheduled_at: str,
+        description: str = "", duration_min: int = 60,
+        meeting_url: str | None = None,
+    ) -> MarketplaceResult:
+        """Schedule only for a released assessment, atomically with stage change."""
+        actor = self._actor("company")
+        if isinstance(actor, MarketplaceResult):
+            return actor
+        if (not self._valid_id(application_id) or not isinstance(title, str)
+                or not isinstance(scheduled_at, str) or not isinstance(description, str)
+                or not isinstance(duration_min, int) or isinstance(duration_min, bool)
+                or (meeting_url is not None and not isinstance(meeting_url, str))):
+            return MarketplaceResult("invalid_input")
+        conn = self._repo.conn
+        try:
+            application = self._repo.application_for_company(actor, application_id)
+            if not application or application["status"] != "assessment":
+                return MarketplaceResult("not_found")
+            candidate_id = int(application["candidate_id"])
+            job_id = int(application["job_posting_id"])
+            if not self._repo.has_released_assessment(actor, job_id, candidate_id):
+                return MarketplaceResult("not_found", {"reason": "Kết quả bài thi chưa được công bố."})
+
+            from app.integration.supplementary_adapters import _InterviewRepositoryAdapter
+            from server.controllers.supplementary_workflow_controller import InterviewController
+            from server.models.recruitment_repository import RecruitmentRepository
+            from server.services.interview_service import InterviewService
+
+            # RecruitmentRepository's nested transaction keeps the interview inside
+            # this outer SAVEPOINT until both interview and stage changes succeed.
+            conn.execute("SAVEPOINT marketplace_interview_handoff")
+            try:
+                recruitment = RecruitmentRepository(conn)
+                interview = InterviewController(
+                    InterviewService(_InterviewRepositoryAdapter(recruitment))
+                ).schedule(
+                    candidate_id, title, scheduled_at, description=description,
+                    duration_min=duration_min, meeting_url=meeting_url,
+                )
+                if not interview.success:
+                    conn.execute("ROLLBACK TO SAVEPOINT marketplace_interview_handoff")
+                    conn.execute("RELEASE SAVEPOINT marketplace_interview_handoff")
+                    return MarketplaceResult("not_found", {"reason": interview.message})
+                change = conn.execute(
+                    """UPDATE job_applications SET status='interview',
+                       updated_at=datetime('now','localtime')
+                       WHERE id=? AND status='assessment'
+                         AND EXISTS (
+                           SELECT 1 FROM job_postings jp
+                           WHERE jp.id=job_applications.job_posting_id
+                             AND jp.company_id=?
+                         )""", (application_id, actor),
+                )
+                if change.rowcount != 1:
+                    conn.execute("ROLLBACK TO SAVEPOINT marketplace_interview_handoff")
+                    conn.execute("RELEASE SAVEPOINT marketplace_interview_handoff")
+                    return MarketplaceResult("not_found")
+                conn.execute("RELEASE SAVEPOINT marketplace_interview_handoff")
+                return MarketplaceResult("success", interview.record)
+            except Exception:
+                conn.execute("ROLLBACK TO SAVEPOINT marketplace_interview_handoff")
+                conn.execute("RELEASE SAVEPOINT marketplace_interview_handoff")
+                raise
+        except sqlite3.Error:
+            logger.exception("Unable to schedule applicant interview")
+            return MarketplaceResult("db_error")
+
     def update_application_status(self, application_id: int, status: str) -> MarketplaceResult:
         actor = self._actor("company")
         if isinstance(actor, MarketplaceResult):
