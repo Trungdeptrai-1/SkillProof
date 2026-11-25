@@ -148,6 +148,56 @@ class MarketplaceService:
             return MarketplaceResult("invalid_input")
         return self._invoke(self._repo.applicants, actor, job_id)
 
+    def list_assessment_exams(self) -> MarketplaceResult:
+        """Published assessment papers owned by the signed-in Company."""
+        actor = self._actor("company")
+        if isinstance(actor, MarketplaceResult):
+            return actor
+        from server.controllers.exam_controller import ExamController
+        from server.models.recruitment_repository import RecruitmentRepository
+        from server.services.exam_service import ExamService
+        exam_repo = RecruitmentRepository(self._repo.conn)
+        result = ExamController(ExamService(exam_repo, exam_repo)).list_exams()
+        if not result.success:
+            return MarketplaceResult("not_found", {"reason": result.message})
+        return MarketplaceResult(
+            "success",
+            [dict(item) for item in result.exams if item.get("is_published") in (True, 1)],
+        )
+
+    def invite_applicant_to_exam(self, application_id: int, exam_id: int) -> MarketplaceResult:
+        """Issue a real exam invitation for a shortlisted, Company-owned application."""
+        actor = self._actor("company")
+        if isinstance(actor, MarketplaceResult):
+            return actor
+        if not self._valid_id(application_id) or not self._valid_id(exam_id):
+            return MarketplaceResult("invalid_input")
+        try:
+            application = self._repo.application_for_company(actor, application_id)
+            if not application or application["status"] != "shortlisted":
+                return MarketplaceResult("not_found")
+            if application["job_status"] != "published":
+                return MarketplaceResult("not_found")
+            from server.controllers.exam_controller import ExamController
+            from server.models.recruitment_repository import RecruitmentRepository
+            from server.services.exam_service import ExamService
+            exam_repo = RecruitmentRepository(self._repo.conn)
+            exam_result = ExamController(ExamService(exam_repo, exam_repo)).invite_candidate(
+                int(application["job_posting_id"]),
+                exam_id,
+                int(application["candidate_id"]),
+            )
+            if not exam_result.success:
+                return MarketplaceResult("not_found", {"reason": exam_result.message})
+            updated = self._repo.update_application_status(actor, application_id, "assessment")
+            if not updated:
+                # Exam invite has been created; report this explicitly for reconciliation.
+                return MarketplaceResult("db_error", {"reason": "Exam invitation created, but pipeline stage not updated."})
+            return MarketplaceResult("success", dict(exam_result.invitation))
+        except sqlite3.Error:
+            logger.exception("Unable to hand off application to assessment")
+            return MarketplaceResult("db_error")
+
     def update_application_status(self, application_id: int, status: str) -> MarketplaceResult:
         actor = self._actor("company")
         if isinstance(actor, MarketplaceResult):

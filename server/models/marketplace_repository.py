@@ -187,6 +187,23 @@ class MarketplaceRepository:
                 (company_id, job_id),
             ))
 
+    def application_for_company(self, company_id: int, application_id: int) -> dict[str, object] | None:
+        """Return a hiring application only when it belongs to this Company."""
+        if type(application_id) is not int or application_id <= 0:
+            return None
+        with _LOCK:
+            if not self._role(company_id, "company"):
+                return None
+            row = self.conn.execute(
+                """SELECT ja.id, ja.job_posting_id, ja.candidate_id, ja.status,
+                          jp.status AS job_status
+                   FROM job_applications ja
+                   JOIN job_postings jp ON jp.id=ja.job_posting_id
+                   WHERE ja.id=? AND jp.company_id=?""",
+                (application_id, company_id),
+            ).fetchone()
+            return dict(row) if row is not None else None
+
     def update_application_status(
         self, company_id: int, application_id: int, status: str
     ) -> bool:

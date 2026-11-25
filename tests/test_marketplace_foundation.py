@@ -123,3 +123,71 @@ def test_saved_jobs_are_scoped_to_owner_and_include_closed_positions(market):
     assert len(listed) == 1 and listed[0]["status"] == "closed"
     assert repo.unsave_job(candidate, published)
     assert repo.saved_jobs(candidate) == []
+
+def test_assessment_handoff_uses_real_applicant_and_changes_stage_only_on_success(market, monkeypatch):
+    from types import SimpleNamespace
+    from app.models.user_model import UserModel
+    from app.services.auth_service import SessionManager
+    from server.services.marketplace_service import MarketplaceService
+
+    conn, repo, company, other, candidate, _, job, _ = market
+    submitted = repo.apply(candidate, job)
+    assert submitted
+    assert repo.update_application_status(company, submitted["id"], "reviewing")
+    assert repo.update_application_status(company, submitted["id"], "shortlisted")
+
+    session = SessionManager.instance()
+    session.end_session()
+    session.start_session(UserModel(
+        id=company, username="comp", email="company@example.test",
+        full_name="Company", role="company", avatar_path=None,
+        is_active=True, created_at="", updated_at="",
+    ))
+    calls = []
+    class StubExamController:
+        def __init__(self, service):
+            pass
+
+        def invite_candidate(self, job_id, exam_id, candidate_id):
+            calls.append((job_id, exam_id, candidate_id))
+            return SimpleNamespace(
+                success=True, invitation={"id": 91}, message="OK",
+            )
+
+    monkeypatch.setattr(
+        "server.controllers.exam_controller.ExamController",
+        StubExamController,
+    )
+    try:
+        service = MarketplaceService(repo)
+        result = service.invite_applicant_to_exam(submitted["id"], 7)
+        assert result.success
+        assert calls == [(job, 7, candidate)]
+        assert repo.application_for_company(company, submitted["id"])["status"] == "assessment"
+        assert repo.application_for_company(other, submitted["id"]) is None
+        assert not service.invite_applicant_to_exam(submitted["id"], 7).success
+        assert calls == [(job, 7, candidate)]
+    finally:
+        session.end_session()
+
+
+def test_assessment_handoff_rejects_wrong_stage_without_sending(market, monkeypatch):
+    from app.models.user_model import UserModel
+    from app.services.auth_service import SessionManager
+    from server.services.marketplace_service import MarketplaceService
+    conn, repo, company, _, candidate, _, job, _ = market
+    application = repo.apply(candidate, job)
+    assert application
+    session = SessionManager.instance()
+    session.end_session()
+    session.start_session(UserModel(
+        id=company, username="comp", email="company@example.test",
+        full_name="Company", role="company", avatar_path=None,
+        is_active=True, created_at="", updated_at="",
+    ))
+    try:
+        result = MarketplaceService(repo).invite_applicant_to_exam(application["id"], 7)
+        assert not result.success
+        assert repo.application_for_company(company, application["id"])["status"] == "submitted"
+    finally:
+        session.end_session()
