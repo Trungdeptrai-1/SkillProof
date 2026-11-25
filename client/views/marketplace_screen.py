@@ -224,6 +224,15 @@ class MarketplaceScreen(QWidget):
         actions.addStretch()
         actions.addWidget(button("Cập nhật hồ sơ đã chọn", self._update_selected, True))
         layout.addLayout(actions)
+        assessment_controls = QHBoxLayout()
+        assessment_controls.addWidget(QLabel("Bài thi đã công bố:"))
+        self.assessment_exams = QComboBox()
+        assessment_controls.addWidget(self.assessment_exams, 1)
+        assessment_controls.addWidget(button("Làm mới bài thi", self._load_assessment_exams))
+        assessment_controls.addWidget(
+            button("Mời ứng viên đã chọn làm bài", self._invite_selected_to_exam, True)
+        )
+        layout.addLayout(assessment_controls)
         self.tabs.addTab(applicants, "Hồ sơ ứng tuyển")
 
         talents = QWidget()
@@ -274,6 +283,7 @@ class MarketplaceScreen(QWidget):
                 self.visibility.setChecked(bool(privacy.data))
         else:
             self._load_positions()
+            self._load_assessment_exams()
             self._load_talents()
             self._load_sent_invites()
 
@@ -399,6 +409,39 @@ class MarketplaceScreen(QWidget):
             return
         result = self.controller.update_application_status(application_id, self.stage.currentData())
         if self._result(result, "Đã cập nhật trạng thái."):
+            self._load_applicants()
+
+    def _load_assessment_exams(self) -> None:
+        result = self.controller.list_assessment_exams()
+        self.assessment_exams.clear()
+        if not self._result(result):
+            return
+        for exam in result.data:
+            self.assessment_exams.addItem(
+                str(exam.get("title") or f"Bài thi #{exam['id']}"),
+                int(exam["id"]),
+            )
+
+    def _invite_selected_to_exam(self) -> None:
+        application_id = selected_id(self.applicants_table)
+        exam_id = self.assessment_exams.currentData()
+        if application_id is None or exam_id is None:
+            self.status.setText("Chọn hồ sơ ứng viên và bài thi đã công bố.")
+            return
+        row = self.applicants_table.currentRow()
+        status_item = self.applicants_table.item(row, 3)
+        if status_item is None or status_item.text() != "shortlisted":
+            self.status.setText("Chỉ gửi bài thi sau khi đưa ứng viên vào danh sách chọn.")
+            return
+        if QMessageBox.question(
+            self, "Xác nhận gửi bài thi",
+            "Gửi lời mời làm bài thi cho ứng viên đã chọn?"
+        ) != QMessageBox.StandardButton.Yes:
+            return
+        result = self.controller.invite_applicant_to_exam(
+            application_id, int(exam_id)
+        )
+        if self._result(result, "Đã gửi lời mời làm bài thi."):
             self._load_applicants()
 
     def _load_talents(self) -> None:
