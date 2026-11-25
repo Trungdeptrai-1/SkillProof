@@ -45,3 +45,9 @@ class MarketplaceController:
 
     def update_application_status(self, application_id: int, status: str) -> MarketplaceResult:
         return self._service.update_application_status(application_id, status)
+
+    def list_assessment_exams(self) -> MarketplaceResult:
+        return self._service.list_assessment_exams()
+
+    def invite_applicant_to_exam(self, application_id: int, exam_id: int) -> MarketplaceResult:
+        return self._service.invite_applicant_to_exam(application_id, exam_id)
