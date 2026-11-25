@@ -417,16 +417,6 @@ class _Sidebar(QWidget):
             cb()
 
     @property
-    def on_open_marketplace(self):
-        return self._on_open_marketplace_cb
-
-    @on_open_marketplace.setter
-    def on_open_marketplace(self, callback):
-        self._on_open_marketplace_cb = callback
-        if self._sidebar:
-            self._sidebar.on_open_marketplace = self._handle_open_marketplace
-
-    @property
     def on_open_extended_workflow(self):
         return self._on_open_extended_workflow_cb
 
@@ -753,6 +743,16 @@ class DashboardScreen(QWidget):
         self._on_open_candidate_assessments_cb = cb
         if self._sidebar:
             self._sidebar.on_open_candidate_assessments = cb
+
+    @property
+    def on_open_marketplace(self):
+        return self._on_open_marketplace_cb
+
+    @on_open_marketplace.setter
+    def on_open_marketplace(self, callback):
+        self._on_open_marketplace_cb = callback
+        if self._sidebar:
+            self._sidebar.on_open_marketplace = self._handle_open_marketplace
 
     @property
     def on_open_extended_workflow(self):
