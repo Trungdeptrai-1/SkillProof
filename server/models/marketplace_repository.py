@@ -174,18 +174,32 @@ class MarketplaceRepository:
             or type(application_id) is not int or application_id <= 0
         ):
             return False
+        transitions = {
+            "submitted": {"reviewing", "rejected"},
+            "reviewing": {"shortlisted", "rejected"},
+            "shortlisted": {"assessment", "interview", "rejected"},
+            "assessment": {"interview", "rejected"},
+            "interview": {"offered", "rejected"},
+        }
         with _LOCK:
             if not self._role(company_id, "company"):
+                return False
+            row = self.conn.execute(
+                """SELECT ja.status FROM job_applications ja
+                   JOIN job_postings jp ON jp.id=ja.job_posting_id
+                   WHERE ja.id=? AND jp.company_id=?""",
+                (application_id, company_id),
+            ).fetchone()
+            if row is None or status not in transitions.get(row["status"], set()):
                 return False
             updated = self.conn.execute(
                 """UPDATE job_applications SET status=?,
                    updated_at=datetime('now','localtime')
-                   WHERE id=? AND status NOT IN ('withdrawn','rejected','offered')
-                     AND EXISTS (
+                   WHERE id=? AND status=? AND EXISTS (
                        SELECT 1 FROM job_postings jp
                        WHERE jp.id=job_applications.job_posting_id AND jp.company_id=?
-                     )""",
-                (status, application_id, company_id),
+                   )""",
+                (status, application_id, row["status"], company_id),
             )
             self.conn.commit()
             return updated.rowcount == 1
