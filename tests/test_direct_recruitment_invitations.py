@@ -72,6 +72,12 @@ def test_candidate_may_accept_or_decline_once_and_only_own_invite(invites):
     assert not repo.respond(stranger, row["id"], True)
     assert repo.respond(candidate, row["id"], True)
     assert repo.received(candidate)[0]["status"] == "accepted"
+    # Candidate is now present in the same applications pipeline as self-applicants.
+    created = repo.conn.execute(
+        "SELECT status FROM job_applications WHERE candidate_id=? AND job_posting_id=?",
+        (candidate, job),
+    ).fetchone()
+    assert created is not None and created["status"] == "submitted"
     assert not repo.respond(candidate, row["id"], False)
     assert not repo.cancel(company, row["id"])
 
@@ -95,3 +101,55 @@ def test_sqlite_trigger_rejects_non_opt_in_candidate(invites):
                (company_id,job_posting_id,candidate_id) VALUES(?,?,?)""",
             (company, job, stranger),
         )
+
+def test_acceptance_reuses_existing_application_without_duplicate(invites):
+    conn, repo, company, _, candidate, _, job, _ = invites
+    conn.execute(
+        "INSERT INTO job_applications(job_posting_id,candidate_id) VALUES(?,?)",
+        (job, candidate),
+    )
+    conn.commit()
+    row = repo.send(company, job, candidate)
+    assert row and repo.respond(candidate, row["id"], True)
+    count = conn.execute(
+        "SELECT COUNT(*) FROM job_applications WHERE job_posting_id=? AND candidate_id=?",
+        (job, candidate),
+    ).fetchone()[0]
+    assert count == 1
+
+
+def test_closed_vacancy_prevents_acceptance_without_partial_changes(invites):
+    conn, repo, company, _, candidate, _, job, _ = invites
+    row = repo.send(company, job, candidate)
+    assert row is not None
+    conn.execute("UPDATE job_postings SET status='closed' WHERE id=?", (job,))
+    conn.commit()
+    assert repo.respond(candidate, row["id"], True) is False
+    assert repo.received(candidate)[0]["status"] == "pending"
+    assert conn.execute(
+        "SELECT COUNT(*) FROM job_applications WHERE candidate_id=?", (candidate,)
+    ).fetchone()[0] == 0
+
+
+def test_decline_does_not_create_application(invites):
+    conn, repo, company, _, candidate, _, job, _ = invites
+    row = repo.send(company, job, candidate)
+    assert row and repo.respond(candidate, row["id"], False)
+    assert repo.received(candidate)[0]["status"] == "declined"
+    assert conn.execute("SELECT count(*) FROM job_applications").fetchone()[0] == 0
+
+
+def test_withdrawn_application_is_not_silently_reopened_by_accepting_invite(invites):
+    conn, repo, company, _, candidate, _, job, _ = invites
+    conn.execute(
+        "INSERT INTO job_applications(job_posting_id,candidate_id,status) VALUES(?,?,'withdrawn')",
+        (job, candidate),
+    )
+    conn.commit()
+    row = repo.send(company, job, candidate)
+    assert row and not repo.respond(candidate, row["id"], True)
+    assert repo.received(candidate)[0]["status"] == "pending"
+    assert conn.execute(
+        "SELECT status FROM job_applications WHERE candidate_id=? AND job_posting_id=?",
+        (candidate, job),
+    ).fetchone()["status"] == "withdrawn"
