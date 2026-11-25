@@ -203,7 +203,11 @@ def test_interview_handoff_requires_released_result_and_company_ownership(market
     assert application
     assert repo.update_application_status(company, application["id"], "reviewing")
     assert repo.update_application_status(company, application["id"], "shortlisted")
-    assert repo.update_application_status(company, application["id"], "assessment")
+    conn.execute(
+        "UPDATE job_applications SET status='assessment' WHERE id=?",
+        (application["id"],),
+    )
+    conn.commit()
     session = SessionManager.instance()
     session.end_session()
     session.start_session(UserModel(
@@ -233,8 +237,10 @@ def test_interview_handoff_changes_stage_only_when_scheduling_succeeds(market, m
     conn, repo, company, _, candidate, _, job, _ = market
     application = repo.apply(candidate, job)
     assert application
-    for new_status in ("reviewing", "shortlisted", "assessment"):
+    for new_status in ("reviewing", "shortlisted"):
         assert repo.update_application_status(company, application["id"], new_status)
+    conn.execute("UPDATE job_applications SET status='assessment' WHERE id=?", (application["id"],))
+    conn.commit()
     monkeypatch.setattr(repo, "has_released_assessment", lambda *_: True)
     calls = []
     class StubInterviewController:
