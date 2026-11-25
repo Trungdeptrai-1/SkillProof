@@ -1768,6 +1768,8 @@ def drop_all_tables() -> None:
     """Xoá toàn bộ bảng — CHỈ dùng cho testing."""
     # Recruitment tables (MIG-006) — drop before their referenced exam tables.
     recruitment_tables = [
+        "saved_job_postings",
+        "job_applications",
         "recruitment_submissions",
         "recruitment_invitations",
         "job_postings",
