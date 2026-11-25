@@ -204,6 +204,24 @@ class MarketplaceRepository:
             ).fetchone()
             return dict(row) if row is not None else None
 
+    def has_released_assessment(self, company_id: int, job_id: int, candidate_id: int) -> bool:
+        """Only a result released for this precise job and Candidate qualifies."""
+        with _LOCK:
+            if not self._role(company_id, "company"):
+                return False
+            return self.conn.execute(
+                """SELECT 1 FROM recruitment_submissions rs
+                   JOIN recruitment_invitations ri ON ri.id=rs.invitation_id
+                   JOIN exam_sessions es ON es.id=rs.exam_session_id
+                   WHERE ri.job_posting_id=? AND ri.company_id=?
+                     AND ri.candidate_id=? AND rs.company_id=?
+                     AND rs.candidate_id=? AND rs.status='released'
+                     AND es.candidate_id=rs.candidate_id
+                     AND es.company_id=rs.company_id
+                   LIMIT 1""",
+                (job_id, company_id, candidate_id, company_id, candidate_id),
+            ).fetchone() is not None
+
     def update_application_status(
         self, company_id: int, application_id: int, status: str
     ) -> bool:
