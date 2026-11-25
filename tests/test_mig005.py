@@ -457,14 +457,14 @@ class TestMig005ECreateAllTables:
         assert "pending_expert" in ddl
 
     def test_total_table_count_unchanged(self, fresh_db):
-        """MIG-005 adds no tables; later migrations add four tables."""
+        """MIG-005 adds no tables; the full schema now includes MIG-011 marketplace tables."""
         conn = fresh_db.get_connection()
         tables = conn.execute(
             "SELECT COUNT(*) FROM sqlite_master WHERE type='table'"
             " AND name NOT LIKE 'sqlite_%'"
         ).fetchone()[0]
-        # 22 business tables, 3 recruitment tables, and two monitoring tables.
-        assert tables == 27, f"Expected 27 tables, got {tables}"
+        # Existing 27 tables plus two MIG-011 marketplace tables.
+        assert tables == 29, f"Expected 29 tables, got {tables}"
 
     def test_contract_code_unique_constraint_still_works(self, fresh_db):
         """UNIQUE(contract_code) vẫn hoạt động sau migrate."""
