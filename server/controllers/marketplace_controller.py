@@ -18,6 +18,9 @@ class MarketplaceController:
     def my_applications(self) -> MarketplaceResult:
         return self._service.my_applications()
 
+    def saved_jobs(self) -> MarketplaceResult:
+        return self._service.saved_jobs()
+
     def withdraw(self, application_id: int) -> MarketplaceResult:
         return self._service.withdraw(application_id)
 
