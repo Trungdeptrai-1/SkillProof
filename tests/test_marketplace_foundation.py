@@ -106,3 +106,20 @@ def test_sql_blocks_wrong_roles_and_duplicate_application(market):
         )
     # The direct SQL attempt must not create an application.
     assert conn.execute("SELECT count(*) FROM job_applications").fetchone()[0] == 0
+
+def test_saved_jobs_are_scoped_to_owner_and_include_closed_positions(market):
+    conn, repo, company, other_company, candidate, second, published, _ = market
+    assert repo.saved_jobs(second) == []
+    assert repo.saved_jobs(company) == []
+    assert repo.save_job(candidate, published)
+    assert [item["id"] for item in repo.saved_jobs(candidate)] == [published]
+    assert repo.saved_jobs(second) == []
+    conn.execute(
+        "UPDATE job_postings SET status='closed' WHERE id=? AND company_id=?",
+        (published, company),
+    )
+    conn.commit()
+    listed = repo.saved_jobs(candidate)
+    assert len(listed) == 1 and listed[0]["status"] == "closed"
+    assert repo.unsave_job(candidate, published)
+    assert repo.saved_jobs(candidate) == []

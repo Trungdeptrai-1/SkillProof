@@ -18,6 +18,9 @@ class MarketplaceController:
     def my_applications(self) -> MarketplaceResult:
         return self._service.my_applications()
 
+    def saved_jobs(self) -> MarketplaceResult:
+        return self._service.saved_jobs()
+
     def withdraw(self, application_id: int) -> MarketplaceResult:
         return self._service.withdraw(application_id)
 
@@ -26,6 +29,9 @@ class MarketplaceController:
 
     def unsave_job(self, job_id: int) -> MarketplaceResult:
         return self._service.unsave_job(job_id)
+
+    def get_discoverable(self) -> MarketplaceResult:
+        return self._service.get_discoverable()
 
     def set_discoverable(self, visible: bool) -> MarketplaceResult:
         return self._service.set_discoverable(visible)

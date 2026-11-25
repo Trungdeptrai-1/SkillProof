@@ -139,6 +139,27 @@ class MarketplaceRepository:
                 self.conn.rollback()
                 return False
 
+    def saved_jobs(self, candidate_id: int) -> list[dict[str, object]]:
+        """Show only the signed-in candidate's saved jobs and publication state."""
+        with _LOCK:
+            if not self._role(candidate_id, "candidate"):
+                return []
+            return self._rows(self.conn.execute(
+                """SELECT jp.id, jp.title, jp.location, jp.status,
+                          COALESCE(cp.company_name,u.full_name) AS company_name,
+                          sj.saved_at,
+                          CASE WHEN ja.id IS NULL THEN 0 ELSE 1 END AS applied
+                   FROM saved_job_postings sj
+                   JOIN job_postings jp ON jp.id=sj.job_posting_id
+                   JOIN users u ON u.id=jp.company_id
+                   LEFT JOIN company_profiles cp ON cp.user_id=jp.company_id
+                   LEFT JOIN job_applications ja
+                     ON ja.job_posting_id=jp.id AND ja.candidate_id=sj.candidate_id
+                   WHERE sj.candidate_id=?
+                   ORDER BY sj.saved_at DESC, jp.id DESC""",
+                (candidate_id,),
+            ))
+
     def unsave_job(self, candidate_id: int, job_id: int) -> bool:
         with _LOCK:
             if not self._role(candidate_id, "candidate"):
@@ -203,6 +224,17 @@ class MarketplaceRepository:
             )
             self.conn.commit()
             return updated.rowcount == 1
+
+    def get_discoverable(self, candidate_id: int) -> bool | None:
+        """Return the persisted privacy choice, or None if no profile exists."""
+        with _LOCK:
+            if not self._role(candidate_id, "candidate"):
+                return None
+            row = self.conn.execute(
+                "SELECT is_discoverable FROM candidate_profiles WHERE user_id=?",
+                (candidate_id,),
+            ).fetchone()
+            return bool(row["is_discoverable"]) if row is not None else None
 
     def set_discoverable(self, candidate_id: int, visible: bool) -> bool:
         if type(visible) is not bool:

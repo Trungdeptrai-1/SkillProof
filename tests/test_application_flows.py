@@ -107,7 +107,9 @@ def test_registration_login_logout_and_screen_navigation(
     login_form._password_input.setText("StrongPassword1")
     login_form._login_btn.click()
 
-    assert window._stack.currentWidget() is window._dashboard
+    # Candidate now lands on Job Discovery immediately after login.
+    assert window._stack.currentWidget() is window._marketplace
+    assert window._marketplace.role == "candidate"
     assert window._dashboard._user.role == "candidate"
     assert SessionManager.instance().is_logged_in
 
@@ -125,7 +127,9 @@ def test_registration_login_logout_and_screen_navigation(
     login_form._email_input.setText("candidate-ui@example.com")
     login_form._password_input.setText("StrongPassword1")
     login_form._login_btn.click()
-    assert window._stack.currentWidget() is window._dashboard
+    # Candidate now lands on Job Discovery immediately after login.
+    assert window._stack.currentWidget() is window._marketplace
+    assert window._marketplace.role == "candidate"
     assert SessionManager.instance().is_logged_in
 
     logout_button = next(

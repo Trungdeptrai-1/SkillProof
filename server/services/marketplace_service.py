@@ -83,6 +83,10 @@ class MarketplaceService:
         actor = self._actor("candidate")
         return actor if isinstance(actor, MarketplaceResult) else self._invoke(self._repo.my_applications, actor)
 
+    def saved_jobs(self) -> MarketplaceResult:
+        actor = self._actor("candidate")
+        return actor if isinstance(actor, MarketplaceResult) else self._invoke(self._repo.saved_jobs, actor)
+
     def withdraw(self, application_id: int) -> MarketplaceResult:
         actor = self._actor("candidate")
         if isinstance(actor, MarketplaceResult):
@@ -106,6 +110,19 @@ class MarketplaceService:
         if not self._valid_id(job_id):
             return MarketplaceResult("invalid_input")
         return self._invoke(self._repo.unsave_job, actor, job_id)
+
+    def get_discoverable(self) -> MarketplaceResult:
+        actor = self._actor("candidate")
+        if isinstance(actor, MarketplaceResult):
+            return actor
+        try:
+            state = self._repo.get_discoverable(actor)
+        except sqlite3.Error:
+            logger.exception("Could not read Candidate profile visibility")
+            return MarketplaceResult("db_error")
+        if state is None:
+            return MarketplaceResult("not_found")
+        return MarketplaceResult("success", state)
 
     def set_discoverable(self, visible: bool) -> MarketplaceResult:
         actor = self._actor("candidate")
