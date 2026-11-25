@@ -189,7 +189,7 @@ class MarketplaceService:
             )
             if not exam_result.success:
                 return MarketplaceResult("not_found", {"reason": exam_result.message})
-            updated = self._repo.update_application_status(actor, application_id, "assessment")
+            updated = self._repo.mark_assessment_after_exam_invitation(actor, application_id)
             if not updated:
                 # Exam invite has been created; report this explicitly for reconciliation.
                 return MarketplaceResult("db_error", {"reason": "Exam invitation created, but pipeline stage not updated."})
