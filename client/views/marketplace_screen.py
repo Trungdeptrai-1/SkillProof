@@ -159,7 +159,7 @@ class MarketplaceScreen(QWidget):
         mine = QWidget()
         mine_layout = QVBoxLayout(mine)
         mine_layout.addWidget(button("Làm mới đơn ứng tuyển", self._load_applications))
-        self.apps_table = table(["ID", "Vị trí", "Công ty", "Trạng thái", "Ngày ứng tuyển"])
+        self.apps_table = table(["ID", "Vị trí", "Công ty", "Trạng thái", "Ngày ứng tuyển", "Phản hồi tuyển dụng"])
         mine_layout.addWidget(self.apps_table)
         mine_layout.addWidget(button("Rút đơn đã chọn", self._withdraw_selected))
         self.tabs.addTab(mine, "Đơn ứng tuyển của tôi")
@@ -216,7 +216,6 @@ class MarketplaceScreen(QWidget):
         self.stage = QComboBox()
         self.stage.addItem("Đang xem xét", "reviewing")
         self.stage.addItem("Vào danh sách chọn", "shortlisted")
-        self.stage.addItem("Đề nghị tuyển dụng", "offered")
         self.stage.addItem("Từ chối", "rejected")
         actions.addWidget(self.stage)
         actions.addStretch()
@@ -249,6 +248,18 @@ class MarketplaceScreen(QWidget):
             "Lên lịch phỏng vấn sau khi công bố kết quả thi",
             self._schedule_selected_interview, True
         ))
+        decision_controls = QHBoxLayout()
+        self.hiring_note = QLineEdit()
+        self.hiring_note.setMaxLength(2000)
+        self.hiring_note.setPlaceholderText("Ghi chú kết quả phỏng vấn (tối đa 2000 ký tự)")
+        decision_controls.addWidget(self.hiring_note, 2)
+        decision_controls.addWidget(button(
+            "Đề nghị tuyển dụng", lambda: self._decide_selected("offered"), True
+        ))
+        decision_controls.addWidget(button(
+            "Từ chối sau phỏng vấn", lambda: self._decide_selected("rejected")
+        ))
+        layout.addLayout(decision_controls)
         self.tabs.addTab(applicants, "Hồ sơ ứng tuyển")
 
         talents = QWidget()
@@ -371,7 +382,7 @@ class MarketplaceScreen(QWidget):
     def _load_applications(self) -> None:
         result = self.controller.my_applications()
         if self._result(result):
-            populate(self.apps_table, list(result.data), ["id", "title", "company_name", "status", "applied_at"])
+            populate(self.apps_table, list(result.data), ["id", "title", "company_name", "status", "applied_at", "decision_note"])
 
     def _withdraw_selected(self) -> None:
         application_id = selected_id(self.apps_table)
@@ -484,6 +495,29 @@ class MarketplaceScreen(QWidget):
             meeting_url=self.interview_url.text().strip() or None,
         )
         if self._result(result, "Đã lên lịch phỏng vấn. Ứng viên có thể xem trong mục Phỏng vấn."):
+            self._load_applicants()
+
+    def _decide_selected(self, decision: str) -> None:
+        application_id = selected_id(self.applicants_table)
+        if application_id is None:
+            self.status.setText("Hãy chọn ứng viên đã phỏng vấn.")
+            return
+        row = self.applicants_table.currentRow()
+        stage_item = self.applicants_table.item(row, 3)
+        if stage_item is None or stage_item.text() != "interview":
+            self.status.setText("Chỉ ra quyết định cuối cùng từ hồ sơ đang phỏng vấn.")
+            return
+        label = "Đề nghị tuyển dụng" if decision == "offered" else "Từ chối ứng viên"
+        if QMessageBox.question(
+            self, "Xác nhận kết quả tuyển dụng",
+            f"{label} cho hồ sơ được chọn? Buổi phỏng vấn phải hoàn tất."
+        ) != QMessageBox.StandardButton.Yes:
+            return
+        result = self.controller.decide_after_interview(
+            application_id, decision, self.hiring_note.text()
+        )
+        if self._result(result, "Đã ghi nhận quyết định tuyển dụng."):
+            self.hiring_note.clear()
             self._load_applicants()
 
     def _load_talents(self) -> None:
