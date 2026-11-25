@@ -148,6 +148,8 @@ def _apply_migrations(conn: sqlite3.Connection) -> None:
     _mig_008_complete_feature_persistence(conn)
     _mig_009_approved_assessment_sources(conn)
     _mig_010_camera_recording_metadata(conn)
+    from server.database.marketplace_migration import migrate_job_marketplace
+    migrate_job_marketplace(conn)
 
 
 # ── MIG-001 ───────────────────────────────────────────────────────────────────
