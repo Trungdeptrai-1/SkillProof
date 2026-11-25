@@ -256,8 +256,18 @@ class MarketplaceService:
                     conn.execute("ROLLBACK TO SAVEPOINT marketplace_interview_handoff")
                     conn.execute("RELEASE SAVEPOINT marketplace_interview_handoff")
                     return MarketplaceResult("not_found")
+                interview_record = interview.record
+                interview_id = interview_record.get("id") if interview_record is not None else None
+                if type(interview_id) is not int or interview_id <= 0:
+                    conn.execute("ROLLBACK TO SAVEPOINT marketplace_interview_handoff")
+                    conn.execute("RELEASE SAVEPOINT marketplace_interview_handoff")
+                    return MarketplaceResult("db_error")
+                conn.execute(
+                    "INSERT INTO application_interviews(application_id,interview_id) VALUES(?,?)",
+                    (application_id, interview_id),
+                )
                 conn.execute("RELEASE SAVEPOINT marketplace_interview_handoff")
-                return MarketplaceResult("success", interview.record)
+                return MarketplaceResult("success", interview_record)
             except Exception:
                 conn.execute("ROLLBACK TO SAVEPOINT marketplace_interview_handoff")
                 conn.execute("RELEASE SAVEPOINT marketplace_interview_handoff")
