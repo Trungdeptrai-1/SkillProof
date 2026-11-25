@@ -56,6 +56,12 @@ def test_recruitment_exam_flow_uses_sqlite_and_releases_candidate_result(
         fresh_db, "other-candidate", "candidate"
     )
     _create_user(fresh_db, "recruitment-expert", "expert")
+    # The legacy Candidate picker must not enumerate private profiles.
+    fresh_db.execute(
+        """INSERT INTO candidate_profiles(user_id, is_discoverable)
+           SELECT id, 1 FROM users WHERE email=?""",
+        (candidate_email,),
+    )
     company_id = fresh_db.fetchone(
         "SELECT id FROM users WHERE email = ?", (company_email,)
     )["id"]
@@ -108,7 +114,8 @@ def test_recruitment_exam_flow_uses_sqlite_and_releases_candidate_result(
 
     candidates = company.list_candidates("recruitment-candidate")
     assert candidates.success
-    assert [item.email for item in candidates.items] == [candidate_email]
+    assert len(candidates.items) == 1
+    assert candidates.items[0].email == ""  # Opt-in alone never reveals contact email.
     invitation = company.send_invitation(
         position_id, exam_id, candidates.items[0].id
     )
