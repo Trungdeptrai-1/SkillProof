@@ -204,6 +204,17 @@ class MarketplaceRepository:
             self.conn.commit()
             return updated.rowcount == 1
 
+    def get_discoverable(self, candidate_id: int) -> bool | None:
+        """Return the persisted privacy choice, or None if no profile exists."""
+        with _LOCK:
+            if not self._role(candidate_id, "candidate"):
+                return None
+            row = self.conn.execute(
+                "SELECT is_discoverable FROM candidate_profiles WHERE user_id=?",
+                (candidate_id,),
+            ).fetchone()
+            return bool(row["is_discoverable"]) if row is not None else None
+
     def set_discoverable(self, candidate_id: int, visible: bool) -> bool:
         if type(visible) is not bool:
             return False
