@@ -87,14 +87,64 @@ class DirectInvitationRepository:
         with _LOCK:
             if not self._active(candidate_id, "candidate"):
                 return False
-            result = self.conn.execute(
-                """UPDATE direct_recruitment_invitations
-                   SET status=?, responded_at=datetime('now','localtime')
-                   WHERE id=? AND candidate_id=? AND status='pending'""",
-                ("accepted" if accepted else "declined", invitation_id, candidate_id),
-            )
-            self.conn.commit()
-            return result.rowcount == 1
+            if not accepted:
+                result = self.conn.execute(
+                    """UPDATE direct_recruitment_invitations
+                       SET status='declined', responded_at=datetime('now','localtime')
+                       WHERE id=? AND candidate_id=? AND status='pending'""",
+                    (invitation_id, candidate_id),
+                )
+                self.conn.commit()
+                return result.rowcount == 1
+
+            # Accepting a recruitment invitation and entering the hiring pipeline
+            # must succeed or fail together. Do not create an exam invitation here.
+            self.conn.execute("SAVEPOINT direct_invitation_accept")
+            try:
+                invitation = self.conn.execute(
+                    """SELECT di.job_posting_id,di.company_id,ja.id AS application_id,
+                              ja.status AS application_status
+                       FROM direct_recruitment_invitations di
+                       JOIN job_postings jp ON jp.id=di.job_posting_id
+                         AND jp.company_id=di.company_id AND jp.status='published'
+                       JOIN users company ON company.id=di.company_id
+                         AND company.role='company' AND company.is_active=1
+                         AND COALESCE(company.is_deleted,0)=0
+                       LEFT JOIN job_applications ja
+                         ON ja.job_posting_id=di.job_posting_id
+                        AND ja.candidate_id=di.candidate_id
+                       WHERE di.id=? AND di.candidate_id=? AND di.status='pending'""",
+                    (invitation_id, candidate_id),
+                ).fetchone()
+                if invitation is None or invitation["application_status"] in ("withdrawn", "rejected"):
+                    self.conn.execute("ROLLBACK TO SAVEPOINT direct_invitation_accept")
+                    self.conn.execute("RELEASE SAVEPOINT direct_invitation_accept")
+                    return False
+
+                if invitation["application_id"] is None:
+                    self.conn.execute(
+                        """INSERT INTO job_applications
+                           (job_posting_id,candidate_id,status,cover_letter)
+                           VALUES(?,?,'submitted','')""",
+                        (invitation["job_posting_id"], candidate_id),
+                    )
+                updated = self.conn.execute(
+                    """UPDATE direct_recruitment_invitations
+                       SET status='accepted', responded_at=datetime('now','localtime')
+                       WHERE id=? AND candidate_id=? AND status='pending'""",
+                    (invitation_id, candidate_id),
+                )
+                if updated.rowcount != 1:
+                    self.conn.execute("ROLLBACK TO SAVEPOINT direct_invitation_accept")
+                    self.conn.execute("RELEASE SAVEPOINT direct_invitation_accept")
+                    return False
+                self.conn.execute("RELEASE SAVEPOINT direct_invitation_accept")
+                self.conn.commit()
+                return True
+            except sqlite3.Error:
+                self.conn.execute("ROLLBACK TO SAVEPOINT direct_invitation_accept")
+                self.conn.execute("RELEASE SAVEPOINT direct_invitation_accept")
+                raise
 
     def cancel(self, company_id: int, invitation_id: int) -> bool:
         if type(invitation_id) is not int or invitation_id <= 0:
