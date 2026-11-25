@@ -256,8 +256,18 @@ class MarketplaceService:
                     conn.execute("ROLLBACK TO SAVEPOINT marketplace_interview_handoff")
                     conn.execute("RELEASE SAVEPOINT marketplace_interview_handoff")
                     return MarketplaceResult("not_found")
+                interview_record = interview.record
+                interview_id = interview_record.get("id") if interview_record is not None else None
+                if type(interview_id) is not int or interview_id <= 0:
+                    conn.execute("ROLLBACK TO SAVEPOINT marketplace_interview_handoff")
+                    conn.execute("RELEASE SAVEPOINT marketplace_interview_handoff")
+                    return MarketplaceResult("db_error")
+                conn.execute(
+                    "INSERT INTO application_interviews(application_id,interview_id) VALUES(?,?)",
+                    (application_id, interview_id),
+                )
                 conn.execute("RELEASE SAVEPOINT marketplace_interview_handoff")
-                return MarketplaceResult("success", interview.record)
+                return MarketplaceResult("success", interview_record)
             except Exception:
                 conn.execute("ROLLBACK TO SAVEPOINT marketplace_interview_handoff")
                 conn.execute("RELEASE SAVEPOINT marketplace_interview_handoff")
@@ -265,6 +275,21 @@ class MarketplaceService:
         except sqlite3.Error:
             logger.exception("Unable to schedule applicant interview")
             return MarketplaceResult("db_error")
+
+    def decide_after_interview(
+        self, application_id: int, decision: str, note: str = ""
+    ) -> MarketplaceResult:
+        actor = self._actor("company")
+        if isinstance(actor, MarketplaceResult):
+            return actor
+        if (not self._valid_id(application_id)
+                or not isinstance(decision, str)
+                or decision not in ("offered", "rejected")
+                or not isinstance(note, str) or len(note) > 2000):
+            return MarketplaceResult("invalid_input")
+        return self._invoke(
+            self._repo.decide_after_interview, actor, application_id, decision, note
+        )
 
     def update_application_status(self, application_id: int, status: str) -> MarketplaceResult:
         actor = self._actor("company")

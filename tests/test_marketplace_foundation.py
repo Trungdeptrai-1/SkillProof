@@ -242,6 +242,12 @@ def test_interview_handoff_changes_stage_only_when_scheduling_succeeds(market, m
     conn.execute("UPDATE job_applications SET status='assessment' WHERE id=?", (application["id"],))
     conn.commit()
     monkeypatch.setattr(repo, "has_released_assessment", lambda *_: True)
+    interview_id = conn.execute(
+        """INSERT INTO interviews(candidate_id,company_id,title,scheduled_at)
+           VALUES(?,?,?,?)""",
+        (candidate, company, "Integration test interview", "2099-12-01T10:00:00"),
+    ).lastrowid
+    conn.commit()
     calls = []
     class StubInterviewController:
         should_fail = True
@@ -251,7 +257,7 @@ def test_interview_handoff_changes_stage_only_when_scheduling_succeeds(market, m
             calls.append((candidate_id, title, scheduled_at))
             if self.should_fail:
                 return SimpleNamespace(success=False, message="Invalid date", record=None)
-            return SimpleNamespace(success=True, message="OK", record={"id": 18})
+            return SimpleNamespace(success=True, message="OK", record={"id": interview_id})
 
     monkeypatch.setattr(
         "server.controllers.supplementary_workflow_controller.InterviewController",
@@ -272,7 +278,59 @@ def test_interview_handoff_changes_stage_only_when_scheduling_succeeds(market, m
         StubInterviewController.should_fail = False
         assert service.schedule_application_interview(*args).success
         assert repo.application_for_company(company, application["id"])["status"] == "interview"
+        assert conn.execute(
+            "SELECT interview_id FROM application_interviews WHERE application_id=?",
+            (application["id"],)
+        ).fetchone()["interview_id"] == interview_id
         assert not service.schedule_application_interview(*args).success
         assert len(calls) == 2
     finally:
         session.end_session()
+
+
+def test_final_hiring_decision_requires_completed_linked_interview(market):
+    from server.database.hiring_decision_migration import migrate_hiring_decisions
+
+    conn, repo, company, other, candidate, second, job, _ = market
+    migrate_hiring_decisions(conn)
+    app = repo.apply(candidate, job)
+    assert app is not None
+    interview_id = conn.execute(
+        """INSERT INTO interviews(candidate_id,company_id,title,scheduled_at,status)
+           VALUES(?,?,?,'2099-12-01T10:00:00','scheduled')""",
+        (candidate, company, "Interview"),
+    ).lastrowid
+    conn.execute(
+        "INSERT INTO application_interviews(application_id,interview_id) VALUES(?,?)",
+        (app["id"], interview_id),
+    )
+    conn.execute("UPDATE job_applications SET status='interview' WHERE id=?", (app["id"],))
+    conn.commit()
+    assert repo.decide_after_interview(other, app["id"], "offered") is None
+    assert repo.decide_after_interview(company, app["id"], "offered") is None
+    assert repo.my_applications(candidate)[0]["decision_note"] == ""
+    conn.execute("UPDATE interviews SET status='completed' WHERE id=?", (interview_id,))
+    conn.commit()
+    result = repo.decide_after_interview(company, app["id"], "offered", "Chúc mừng, đạt yêu cầu")
+    assert result and result["status"] == "offered"
+    assert result["decision_note"] == "Chúc mừng, đạt yêu cầu"
+    assert repo.decide_after_interview(company, app["id"], "rejected") is None
+    assert repo.my_applications(candidate)[0]["decision_note"] == "Chúc mừng, đạt yêu cầu"
+    assert repo.my_applications(second) == []
+
+
+def test_interview_link_rejects_mismatched_candidate_and_company(market):
+    conn, repo, company, other, candidate, second, job, _ = market
+    app = repo.apply(candidate, job)
+    assert app
+    wrong_candidate_interview = conn.execute(
+        """INSERT INTO interviews(candidate_id,company_id,title,scheduled_at)
+           VALUES(?,?,?,?)""",
+        (second, company, "Other person", "2099-12-01T10:00:00"),
+    ).lastrowid
+    with pytest.raises(sqlite3.IntegrityError):
+        conn.execute(
+            "INSERT INTO application_interviews(application_id,interview_id) VALUES(?,?)",
+            (app["id"], wrong_candidate_interview),
+        )
+    assert conn.execute("SELECT count(*) FROM application_interviews").fetchone()[0] == 0

@@ -7,7 +7,7 @@ from server.database.connection import db
 
 _LOCK = RLock()
 COMPANY_STATUSES = frozenset(
-    {"reviewing", "shortlisted", "offered", "rejected"}
+    {"reviewing", "shortlisted", "rejected"}
 )
 
 
@@ -89,11 +89,13 @@ class MarketplaceRepository:
             return self._rows(self.conn.execute(
                 """SELECT ja.id,ja.job_posting_id,ja.status,ja.applied_at,
                           ja.updated_at,jp.title, jp.location,
+                          ai.decision_note, ai.decided_at,
                           COALESCE(cp.company_name,u.full_name) AS company_name
                    FROM job_applications ja
                    JOIN job_postings jp ON jp.id=ja.job_posting_id
                    JOIN users u ON u.id=jp.company_id
                    LEFT JOIN company_profiles cp ON cp.user_id=jp.company_id
+                   LEFT JOIN application_interviews ai ON ai.application_id=ja.id
                    WHERE ja.candidate_id=? ORDER BY ja.applied_at DESC,ja.id DESC""",
                 (candidate_id,),
             ))
@@ -258,7 +260,7 @@ class MarketplaceRepository:
             "reviewing": {"shortlisted", "rejected"},
             "shortlisted": {"rejected"},
             "assessment": {"rejected"},
-            "interview": {"offered", "rejected"},
+            "interview": set(),
         }
         with _LOCK:
             if not self._role(company_id, "company"):
@@ -282,6 +284,64 @@ class MarketplaceRepository:
             )
             self.conn.commit()
             return updated.rowcount == 1
+
+    def decide_after_interview(
+        self, company_id: int, application_id: int, decision: str, note: str = ""
+    ) -> dict[str, object] | None:
+        """Finalize only a completed interview linked to this exact application."""
+        if (type(application_id) is not int or application_id <= 0
+                or decision not in ("offered", "rejected")
+                or not isinstance(note, str) or len(note) > 2000):
+            return None
+        with _LOCK:
+            if not self._role(company_id, "company"):
+                return None
+            self.conn.execute("SAVEPOINT hiring_decision")
+            try:
+                row = self.conn.execute(
+                    """SELECT ai.interview_id, ja.status, i.status AS interview_status
+                       FROM application_interviews ai
+                       JOIN job_applications ja ON ja.id=ai.application_id
+                       JOIN job_postings jp ON jp.id=ja.job_posting_id
+                       JOIN interviews i ON i.id=ai.interview_id
+                       WHERE ai.application_id=? AND jp.company_id=?
+                         AND i.company_id=? AND i.candidate_id=ja.candidate_id
+                         AND ai.decision IS NULL""",
+                    (application_id, company_id, company_id),
+                ).fetchone()
+                if row is None or row["status"] != "interview" or row["interview_status"] != "completed":
+                    self.conn.execute("ROLLBACK TO SAVEPOINT hiring_decision")
+                    self.conn.execute("RELEASE SAVEPOINT hiring_decision")
+                    return None
+                self.conn.execute(
+                    """UPDATE application_interviews
+                       SET decision=?,decision_note=?,decided_at=datetime('now','localtime')
+                       WHERE application_id=? AND decision IS NULL""",
+                    (decision, note.strip(), application_id),
+                )
+                updated = self.conn.execute(
+                    """UPDATE job_applications SET status=?,
+                       updated_at=datetime('now','localtime')
+                       WHERE id=? AND status='interview'""",
+                    (decision, application_id),
+                )
+                if updated.rowcount != 1:
+                    self.conn.execute("ROLLBACK TO SAVEPOINT hiring_decision")
+                    self.conn.execute("RELEASE SAVEPOINT hiring_decision")
+                    return None
+                result = self.conn.execute(
+                    """SELECT ja.id,ja.status,ai.interview_id,ai.decision,
+                              ai.decision_note,ai.decided_at
+                       FROM job_applications ja JOIN application_interviews ai
+                         ON ai.application_id=ja.id WHERE ja.id=?""",
+                    (application_id,),
+                ).fetchone()
+                self.conn.execute("RELEASE SAVEPOINT hiring_decision")
+                return dict(result)
+            except sqlite3.Error:
+                self.conn.execute("ROLLBACK TO SAVEPOINT hiring_decision")
+                self.conn.execute("RELEASE SAVEPOINT hiring_decision")
+                raise
 
     def get_discoverable(self, candidate_id: int) -> bool | None:
         """Return the persisted privacy choice, or None if no profile exists."""
