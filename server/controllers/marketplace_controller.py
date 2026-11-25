@@ -51,3 +51,12 @@ class MarketplaceController:
 
     def invite_applicant_to_exam(self, application_id: int, exam_id: int) -> MarketplaceResult:
         return self._service.invite_applicant_to_exam(application_id, exam_id)
+
+    def schedule_application_interview(
+        self, application_id: int, title: str, scheduled_at: str,
+        description: str = "", duration_min: int = 60,
+        meeting_url: str | None = None,
+    ) -> MarketplaceResult:
+        return self._service.schedule_application_interview(
+            application_id, title, scheduled_at, description, duration_min, meeting_url
+        )

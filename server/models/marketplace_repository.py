@@ -7,7 +7,7 @@ from server.database.connection import db
 
 _LOCK = RLock()
 COMPANY_STATUSES = frozenset(
-    {"reviewing", "shortlisted", "assessment", "interview", "offered", "rejected"}
+    {"reviewing", "shortlisted", "offered", "rejected"}
 )
 
 
@@ -204,6 +204,47 @@ class MarketplaceRepository:
             ).fetchone()
             return dict(row) if row is not None else None
 
+    def mark_assessment_after_exam_invitation(self, company_id: int, application_id: int) -> bool:
+        """Private pipeline transition after ExamService confirmed invitation creation.
+
+        Generic status actions deliberately cannot jump to 'assessment'.
+        """
+        if type(application_id) is not int or application_id <= 0:
+            return False
+        with _LOCK:
+            if not self._role(company_id, "company"):
+                return False
+            update = self.conn.execute(
+                """UPDATE job_applications SET status='assessment',
+                   updated_at=datetime('now','localtime')
+                   WHERE id=? AND status='shortlisted'
+                     AND EXISTS (
+                         SELECT 1 FROM job_postings jp
+                         WHERE jp.id=job_applications.job_posting_id
+                           AND jp.company_id=? AND jp.status='published'
+                     )""", (application_id, company_id),
+            )
+            self.conn.commit()
+            return update.rowcount == 1
+
+    def has_released_assessment(self, company_id: int, job_id: int, candidate_id: int) -> bool:
+        """Only a result released for this precise job and Candidate qualifies."""
+        with _LOCK:
+            if not self._role(company_id, "company"):
+                return False
+            return self.conn.execute(
+                """SELECT 1 FROM recruitment_submissions rs
+                   JOIN recruitment_invitations ri ON ri.id=rs.invitation_id
+                   JOIN exam_sessions es ON es.id=rs.exam_session_id
+                   WHERE ri.job_posting_id=? AND ri.company_id=?
+                     AND ri.candidate_id=? AND rs.company_id=?
+                     AND rs.candidate_id=? AND rs.status='released'
+                     AND es.candidate_id=rs.candidate_id
+                     AND es.company_id=rs.company_id
+                   LIMIT 1""",
+                (job_id, company_id, candidate_id, company_id, candidate_id),
+            ).fetchone() is not None
+
     def update_application_status(
         self, company_id: int, application_id: int, status: str
     ) -> bool:
@@ -215,8 +256,8 @@ class MarketplaceRepository:
         transitions = {
             "submitted": {"reviewing", "rejected"},
             "reviewing": {"shortlisted", "rejected"},
-            "shortlisted": {"assessment", "interview", "rejected"},
-            "assessment": {"interview", "rejected"},
+            "shortlisted": {"rejected"},
+            "assessment": {"rejected"},
             "interview": {"offered", "rejected"},
         }
         with _LOCK:
