@@ -3,7 +3,10 @@ import os
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from dataclasses import replace
+import gc
+import pytest
 
+from PySide6.QtCore import QCoreApplication, QEvent
 from PySide6.QtWidgets import QApplication, QPushButton
 
 from app.ui.screens.company_profile_screen import (
@@ -46,8 +49,34 @@ from server.models.skill_model import SkillModel
 from server.models.user_model import UserModel
 
 
+# Keep the QApplication alive across all tests in this module. Otherwise Qt's
+# Python wrapper can be destroyed while widgets still have pending delete events.
+_QT_APP = None
+
+
 def _qt_app():
-    return QApplication.instance() or QApplication([])
+    global _QT_APP
+    if _QT_APP is None:
+        _QT_APP = QApplication.instance() or QApplication([])
+    return _QT_APP
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _cleanup_qt_on_module_exit():
+    """Drain deferred deletions before QApplication is destroyed."""
+    yield
+    global _QT_APP
+    app = QApplication.instance()
+    if app is not None:
+        for widget in list(app.topLevelWidgets()):
+            widget.close()
+            widget.deleteLater()
+        QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+        app.processEvents()
+        gc.collect()
+        QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+        app.processEvents()
+    _QT_APP = None
 
 
 def test_moved_views_keep_legacy_import_compatibility():

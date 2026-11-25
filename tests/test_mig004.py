@@ -61,7 +61,7 @@ class TestMig004CreatesTables:
             assert table in tables, f"Thiếu bảng: {table}"
 
     def test_table_count_after_migration(self, fresh_db):
-        """The full initialized schema includes MIG-004 through MIG-007 tables."""
+        """The fully initialized schema includes all migrations through MIG-011."""
         conn = fresh_db.get_connection()
         _mig_004_create_business_tables(conn)
 
@@ -71,7 +71,7 @@ class TestMig004CreatesTables:
                 "AND name NOT LIKE 'sqlite_%'"
             ).fetchall()
         ]
-        assert len(tables) == 27, f"Expected 27 tables, got {len(tables)}: {tables}"
+        assert len(tables) == 29, f"Expected 29 tables, got {len(tables)}: {tables}"
 
     @pytest.mark.parametrize("table_name", EXPECTED_NEW_TABLES)
     def test_each_table_exists(self, fresh_db, table_name):
@@ -111,7 +111,7 @@ class TestMig004Idempotent:
             "SELECT COUNT(*) FROM sqlite_master WHERE type='table' "
             "AND name NOT LIKE 'sqlite_%'"
         ).fetchone()[0]
-        assert count == 27
+        assert count == 29
 
     def test_create_all_tables_includes_mig004(self, fresh_db):
         """create_all_tables() phải chạy MIG-004 tự động."""

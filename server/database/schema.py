@@ -148,6 +148,8 @@ def _apply_migrations(conn: sqlite3.Connection) -> None:
     _mig_008_complete_feature_persistence(conn)
     _mig_009_approved_assessment_sources(conn)
     _mig_010_camera_recording_metadata(conn)
+    from server.database.marketplace_migration import migrate_job_marketplace
+    migrate_job_marketplace(conn)
 
 
 # ── MIG-001 ───────────────────────────────────────────────────────────────────
@@ -1766,6 +1768,8 @@ def drop_all_tables() -> None:
     """Xoá toàn bộ bảng — CHỈ dùng cho testing."""
     # Recruitment tables (MIG-006) — drop before their referenced exam tables.
     recruitment_tables = [
+        "saved_job_postings",
+        "job_applications",
         "recruitment_submissions",
         "recruitment_invitations",
         "job_postings",
