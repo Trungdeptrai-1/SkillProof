@@ -65,7 +65,7 @@ ROLE_CONFIG: dict[str, dict] = {
             ("👤", "Hồ sơ cá nhân",         "Cập nhật thông tin và kỹ năng"),
             ("🏅", "Kỹ năng của tôi",       "Danh sách và mức độ thành thạo"),
             ("📜", "Chứng chỉ",             "Chứng nhận kỹ năng đã đạt được"),
-            ("🔎", "Khám phá cơ hội",       "Tìm kiếm vị trí phù hợp năng lực"),
+            ("🔎", "Khám phá cơ hội",       "Tìm kiếm và ứng tuyển vị trí phù hợp"),
             ("📝", "Lời mời làm bài",       "Nhận lời mời, làm bài thi và xem kết quả"),
             ("✍", "Bài tự luận & Coding",  "Bài trả lời dài và lập trình"),
             ("⏱", "Giám sát phiên thi",    "Trạng thái phiên và cảnh báo focus cục bộ"),
@@ -82,6 +82,7 @@ ROLE_CONFIG: dict[str, dict] = {
             ("🎯", "Nhiệm vụ của tôi",       "Tạo và theo dõi nhiệm vụ"),
             ("🏢", "Hồ sơ doanh nghiệp",     "Cập nhật thông tin doanh nghiệp"),
             ("🧑‍💼", "Tuyển dụng & đánh giá", "Vị trí, bài thi, lời mời và kết quả"),
+            ("📥", "Hồ sơ ứng tuyển", "Xem đơn ứng tuyển và khám phá nhân tài"),
             ("📝", "Chấm bài tự luận/Coding", "Chấm thủ công khi backend hỗ trợ"),
             ("🗓", "Lịch phỏng vấn",          "Lịch và ghi chú đánh giá"),
             ("📜", "Chứng chỉ",               "Cấp hoặc xác minh theo quyền Controller"),
@@ -135,6 +136,7 @@ class _Sidebar(QWidget):
         self._on_open_company_recruitment_cb = None
         self._on_open_candidate_assessments_cb = None
         self._on_open_extended_workflow_cb = None
+        self._on_open_marketplace_cb = None
         self._setup_ui()
 
     def paintEvent(self, event):  # noqa: N802
@@ -218,6 +220,8 @@ class _Sidebar(QWidget):
                 btn.clicked.connect(self._handle_open_candidate_profile)
             elif self._user.role == "candidate" and label == "Lời mời làm bài":
                 btn.clicked.connect(self._handle_open_candidate_assessments)
+            elif (self._user.role == "candidate" and label == "Khám phá cơ hội") or (self._user.role == "company" and label == "Hồ sơ ứng tuyển"):
+                btn.clicked.connect(self._handle_open_marketplace)
             elif self._user.role == "company" and label == "Hồ sơ doanh nghiệp":
                 btn.clicked.connect(self._handle_open_company_profile)
             elif self._user.role == "company" and label == "Tuyển dụng & đánh giá":
@@ -400,12 +404,29 @@ class _Sidebar(QWidget):
             self._on_open_candidate_assessments_cb()
 
     @property
+    def on_open_marketplace(self):
+        return getattr(self, "_on_open_marketplace_cb", None)
+
+    @on_open_marketplace.setter
+    def on_open_marketplace(self, cb):
+        self._on_open_marketplace_cb = cb
+
+    def _handle_open_marketplace(self) -> None:
+        cb = getattr(self, "_on_open_marketplace_cb", None)
+        if callable(cb):
+            cb()
+
+    @property
     def on_open_extended_workflow(self):
         return self._on_open_extended_workflow_cb
 
     @on_open_extended_workflow.setter
     def on_open_extended_workflow(self, callback):
         self._on_open_extended_workflow_cb = callback
+
+    def _handle_open_marketplace(self) -> None:
+        if callable(self._on_open_marketplace_cb):
+            self._on_open_marketplace_cb()
 
     def _handle_open_extended_workflow(self, route: str) -> None:
         if callable(self._on_open_extended_workflow_cb):
