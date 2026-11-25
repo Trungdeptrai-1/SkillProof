@@ -37,6 +37,9 @@ class FakeMarketplaceController:
     def my_applications(self):
         return self._answer("mine", data=[])
 
+    def saved_jobs(self):
+        return self._answer("saved", data=[])
+
     def get_discoverable(self):
         return self._answer("visibility", data=True)
 
@@ -79,6 +82,7 @@ def test_candidate_can_browse_and_save_from_ui():
     screen = MarketplaceScreen("candidate", controller=controller)
     assert screen.jobs_table.rowCount() == 1
     assert screen.visibility.isChecked()
+    assert ("saved", ()) in controller.calls
     screen.jobs_table.selectRow(0)
     screen._save_selected()
     assert ("save", (7,)) in controller.calls
