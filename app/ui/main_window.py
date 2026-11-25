@@ -672,6 +672,9 @@ class MainWindow(QMainWindow):
 
     def _on_login_success(self, user: UserModel) -> None:
         self._show_dashboard(user)
+        # Candidate home is now the job discovery experience.
+        if user.role == "candidate":
+            self._show_marketplace()
 
     def _on_logout(self) -> None:
         self._discard_admin_screens()
