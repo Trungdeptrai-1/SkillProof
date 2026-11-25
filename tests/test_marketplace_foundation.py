@@ -191,3 +191,82 @@ def test_assessment_handoff_rejects_wrong_stage_without_sending(market, monkeypa
         assert repo.application_for_company(company, application["id"])["status"] == "submitted"
     finally:
         session.end_session()
+
+
+def test_interview_handoff_requires_released_result_and_company_ownership(market, monkeypatch):
+    from app.models.user_model import UserModel
+    from app.services.auth_service import SessionManager
+    from server.services.marketplace_service import MarketplaceService
+
+    conn, repo, company, other, candidate, _, job, _ = market
+    application = repo.apply(candidate, job)
+    assert application
+    assert repo.update_application_status(company, application["id"], "reviewing")
+    assert repo.update_application_status(company, application["id"], "shortlisted")
+    assert repo.update_application_status(company, application["id"], "assessment")
+    session = SessionManager.instance()
+    session.end_session()
+    session.start_session(UserModel(
+        id=company, username="company", email="company@sample.test",
+        full_name="Company", role="company", avatar_path=None,
+        is_active=True, created_at="", updated_at="",
+    ))
+    try:
+        service = MarketplaceService(repo)
+        result = service.schedule_application_interview(
+            application["id"], "Technical interview", "2099-12-01T10:00:00"
+        )
+        assert not result.success
+        assert repo.application_for_company(company, application["id"])["status"] == "assessment"
+        assert repo.application_for_company(other, application["id"]) is None
+        assert not repo.has_released_assessment(company, job, candidate)
+    finally:
+        session.end_session()
+
+
+def test_interview_handoff_changes_stage_only_when_scheduling_succeeds(market, monkeypatch):
+    from types import SimpleNamespace
+    from app.models.user_model import UserModel
+    from app.services.auth_service import SessionManager
+    from server.services.marketplace_service import MarketplaceService
+
+    conn, repo, company, _, candidate, _, job, _ = market
+    application = repo.apply(candidate, job)
+    assert application
+    for new_status in ("reviewing", "shortlisted", "assessment"):
+        assert repo.update_application_status(company, application["id"], new_status)
+    monkeypatch.setattr(repo, "has_released_assessment", lambda *_: True)
+    calls = []
+    class StubInterviewController:
+        should_fail = True
+        def __init__(self, service):
+            pass
+        def schedule(self, candidate_id, title, scheduled_at, **kwargs):
+            calls.append((candidate_id, title, scheduled_at))
+            if self.should_fail:
+                return SimpleNamespace(success=False, message="Invalid date", record=None)
+            return SimpleNamespace(success=True, message="OK", record={"id": 18})
+
+    monkeypatch.setattr(
+        "server.controllers.supplementary_workflow_controller.InterviewController",
+        StubInterviewController,
+    )
+    session = SessionManager.instance()
+    session.end_session()
+    session.start_session(UserModel(
+        id=company, username="company", email="company@sample.test",
+        full_name="Company", role="company", avatar_path=None,
+        is_active=True, created_at="", updated_at="",
+    ))
+    try:
+        service = MarketplaceService(repo)
+        args = (application["id"], "Interview", "2099-12-01T10:00:00")
+        assert not service.schedule_application_interview(*args).success
+        assert repo.application_for_company(company, application["id"])["status"] == "assessment"
+        StubInterviewController.should_fail = False
+        assert service.schedule_application_interview(*args).success
+        assert repo.application_for_company(company, application["id"])["status"] == "interview"
+        assert not service.schedule_application_interview(*args).success
+        assert len(calls) == 2
+    finally:
+        session.end_session()
