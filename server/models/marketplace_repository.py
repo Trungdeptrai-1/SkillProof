@@ -7,7 +7,7 @@ from server.database.connection import db
 
 _LOCK = RLock()
 COMPANY_STATUSES = frozenset(
-    {"reviewing", "shortlisted", "assessment", "offered", "rejected"}
+    {"reviewing", "shortlisted", "offered", "rejected"}
 )
 
 
@@ -233,7 +233,7 @@ class MarketplaceRepository:
         transitions = {
             "submitted": {"reviewing", "rejected"},
             "reviewing": {"shortlisted", "rejected"},
-            "shortlisted": {"assessment", "rejected"},
+            "shortlisted": {"rejected"},
             "assessment": {"rejected"},
             "interview": {"offered", "rejected"},
         }
