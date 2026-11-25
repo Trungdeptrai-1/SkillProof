@@ -417,16 +417,22 @@ class _Sidebar(QWidget):
             cb()
 
     @property
+    def on_open_marketplace(self):
+        return self._on_open_marketplace_cb
+
+    @on_open_marketplace.setter
+    def on_open_marketplace(self, callback):
+        self._on_open_marketplace_cb = callback
+        if self._sidebar:
+            self._sidebar.on_open_marketplace = self._handle_open_marketplace
+
+    @property
     def on_open_extended_workflow(self):
         return self._on_open_extended_workflow_cb
 
     @on_open_extended_workflow.setter
     def on_open_extended_workflow(self, callback):
         self._on_open_extended_workflow_cb = callback
-
-    def _handle_open_marketplace(self) -> None:
-        if callable(self._on_open_marketplace_cb):
-            self._on_open_marketplace_cb()
 
     def _handle_open_extended_workflow(self, route: str) -> None:
         if callable(self._on_open_extended_workflow_cb):
@@ -655,6 +661,7 @@ class DashboardScreen(QWidget):
         self._on_open_tasks_cb = None
         self._on_open_company_recruitment_cb = None
         self._on_open_candidate_assessments_cb = None
+        self._on_open_marketplace_cb = None
         self._on_open_extended_workflow_cb = None
         self._setup_ui()
         QTimer.singleShot(80, self._animate_in)
@@ -772,6 +779,7 @@ class DashboardScreen(QWidget):
         self._sidebar.on_open_tasks = self._handle_open_tasks
         self._sidebar.on_open_company_recruitment = self._handle_open_company_recruitment
         self._sidebar.on_open_candidate_assessments = self._handle_open_candidate_assessments
+        self._sidebar.on_open_marketplace = self._handle_open_marketplace
         self._sidebar.on_open_extended_workflow = self._handle_open_extended_workflow
 
         self._content = _ContentArea(self._user)
@@ -826,6 +834,10 @@ class DashboardScreen(QWidget):
     def _handle_open_candidate_assessments(self) -> None:
         if callable(self._on_open_candidate_assessments_cb):
             self._on_open_candidate_assessments_cb()
+
+    def _handle_open_marketplace(self) -> None:
+        if callable(self._on_open_marketplace_cb):
+            self._on_open_marketplace_cb()
 
     def _handle_open_extended_workflow(self, route: str) -> None:
         if callable(self._on_open_extended_workflow_cb):
