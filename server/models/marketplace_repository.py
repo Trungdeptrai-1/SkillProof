@@ -204,6 +204,29 @@ class MarketplaceRepository:
             ).fetchone()
             return dict(row) if row is not None else None
 
+    def mark_assessment_after_exam_invitation(self, company_id: int, application_id: int) -> bool:
+        """Private pipeline transition after ExamService confirmed invitation creation.
+
+        Generic status actions deliberately cannot jump to 'assessment'.
+        """
+        if type(application_id) is not int or application_id <= 0:
+            return False
+        with _LOCK:
+            if not self._role(company_id, "company"):
+                return False
+            update = self.conn.execute(
+                """UPDATE job_applications SET status='assessment',
+                   updated_at=datetime('now','localtime')
+                   WHERE id=? AND status='shortlisted'
+                     AND EXISTS (
+                         SELECT 1 FROM job_postings jp
+                         WHERE jp.id=job_applications.job_posting_id
+                           AND jp.company_id=? AND jp.status='published'
+                     )""", (application_id, company_id),
+            )
+            self.conn.commit()
+            return update.rowcount == 1
+
     def has_released_assessment(self, company_id: int, job_id: int, candidate_id: int) -> bool:
         """Only a result released for this precise job and Candidate qualifies."""
         with _LOCK:
