@@ -463,8 +463,8 @@ class TestMig005ECreateAllTables:
             "SELECT COUNT(*) FROM sqlite_master WHERE type='table'"
             " AND name NOT LIKE 'sqlite_%'"
         ).fetchone()[0]
-        # Existing 27 tables, two MIG-011 tables and one MIG-012 table.
-        assert tables == 30, f"Expected 30 tables, got {tables}"
+        # Existing 27 tables, two MIG-011 tables and one MIG-012 table, one MIG-013 interview link table.
+        assert tables == 31, f"Expected 31 tables, got {tables}"
 
     def test_contract_code_unique_constraint_still_works(self, fresh_db):
         """UNIQUE(contract_code) vẫn hoạt động sau migrate."""
