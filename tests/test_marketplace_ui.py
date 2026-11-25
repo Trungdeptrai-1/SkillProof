@@ -68,6 +68,23 @@ class FakeMarketplaceController:
         return self._answer("status", app_id, status, data=True)
 
 
+class FakeInvitations:
+    def received(self):
+        return SimpleNamespace(success=True, data=[], message="OK")
+
+    def sent(self):
+        return SimpleNamespace(success=True, data=[], message="OK")
+
+    def respond(self, invitation_id, accepted):
+        return SimpleNamespace(success=True, data=True, message="OK")
+
+    def send(self, job_id, candidate_id, message=""):
+        return SimpleNamespace(success=True, data={"id": 1}, message="OK")
+
+    def cancel(self, invitation_id):
+        return SimpleNamespace(success=True, data=True, message="OK")
+
+
 def make_user(role):
     return UserModel(
         id=1, username=role, email=role + "@example.test",
@@ -79,7 +96,7 @@ def make_user(role):
 def test_candidate_can_browse_and_save_from_ui():
     app = qt_app()
     controller = FakeMarketplaceController()
-    screen = MarketplaceScreen("candidate", controller=controller)
+    screen = MarketplaceScreen("candidate", controller=controller, invitation_controller=FakeInvitations())
     assert screen.jobs_table.rowCount() == 1
     assert screen.visibility.isChecked()
     assert ("saved", ()) in controller.calls
