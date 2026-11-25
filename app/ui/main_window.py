@@ -25,6 +25,7 @@ from client.views.first_run_screen import FirstRunScreen
 from client.views.grading_screen import GradingScreen
 from client.views.interview_screen import InterviewScreen
 from client.views.login_screen import LoginScreen
+from client.views.marketplace_screen import MarketplaceScreen
 from client.views.register_screen import RegisterScreen
 from client.views.skill_management_screen import SkillManagementScreen
 from client.views.task_management_screen import TaskManagementScreen
@@ -81,6 +82,7 @@ class MainWindow(QMainWindow):
         self._skill_management: SkillManagementScreen | None = None
         self._company_recruitment: CompanyRecruitmentScreen | None = None
         self._candidate_assessments: CandidateAssessmentScreen | None = None
+        self._marketplace: MarketplaceScreen | None = None
         self._candidate_special_assessments: CandidateSpecialAssessmentScreen | None = None
         self._grading_screen: GradingScreen | None = None
         self._exam_monitor: ExamMonitorScreen | None = None
@@ -271,6 +273,7 @@ class MainWindow(QMainWindow):
             dashboard.on_open_tasks = self._show_tasks
             dashboard.on_open_company_recruitment = self._show_company_recruitment
             dashboard.on_open_candidate_assessments = self._show_candidate_assessments
+            dashboard.on_open_marketplace = self._show_marketplace
             dashboard.on_open_extended_workflow = self._show_extended_workflow
         self._dashboard = dashboard
         self._stack.addWidget(self._dashboard)
@@ -285,7 +288,7 @@ class MainWindow(QMainWindow):
                 setattr(self, attribute, None)
 
     def _discard_recruitment_screens(self) -> None:
-        for attribute in ("_company_recruitment", "_candidate_assessments"):
+        for attribute in ("_company_recruitment", "_candidate_assessments", "_marketplace"):
             screen = getattr(self, attribute)
             if screen is not None:
                 self._stack.removeWidget(screen)
@@ -382,6 +385,21 @@ class MainWindow(QMainWindow):
         else:
             self._candidate_assessments.refresh_invitations()
         self._stack.setCurrentWidget(self._candidate_assessments)
+
+    def _show_marketplace(self) -> None:
+        from app.services.auth_service import SessionManager
+
+        session = SessionManager.instance()
+        user = session.current_user
+        if not session.is_logged_in or user is None or user.role not in ("candidate", "company"):
+            return
+        if self._marketplace is not None:
+            self._stack.removeWidget(self._marketplace)
+            self._marketplace.deleteLater()
+        self._marketplace = MarketplaceScreen(role=user.role)
+        self._marketplace.on_back = self._on_recruitment_back
+        self._stack.addWidget(self._marketplace)
+        self._stack.setCurrentWidget(self._marketplace)
 
     def _on_recruitment_back(self) -> None:
         if self._dashboard is not None:
