@@ -83,6 +83,10 @@ class MarketplaceService:
         actor = self._actor("candidate")
         return actor if isinstance(actor, MarketplaceResult) else self._invoke(self._repo.my_applications, actor)
 
+    def saved_jobs(self) -> MarketplaceResult:
+        actor = self._actor("candidate")
+        return actor if isinstance(actor, MarketplaceResult) else self._invoke(self._repo.saved_jobs, actor)
+
     def withdraw(self, application_id: int) -> MarketplaceResult:
         actor = self._actor("candidate")
         if isinstance(actor, MarketplaceResult):
