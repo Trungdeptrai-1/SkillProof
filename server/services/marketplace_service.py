@@ -276,6 +276,21 @@ class MarketplaceService:
             logger.exception("Unable to schedule applicant interview")
             return MarketplaceResult("db_error")
 
+    def decide_after_interview(
+        self, application_id: int, decision: str, note: str = ""
+    ) -> MarketplaceResult:
+        actor = self._actor("company")
+        if isinstance(actor, MarketplaceResult):
+            return actor
+        if (not self._valid_id(application_id)
+                or not isinstance(decision, str)
+                or decision not in ("offered", "rejected")
+                or not isinstance(note, str) or len(note) > 2000):
+            return MarketplaceResult("invalid_input")
+        return self._invoke(
+            self._repo.decide_after_interview, actor, application_id, decision, note
+        )
+
     def update_application_status(self, application_id: int, status: str) -> MarketplaceResult:
         actor = self._actor("company")
         if isinstance(actor, MarketplaceResult):
