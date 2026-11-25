@@ -76,6 +76,7 @@ class MarketplaceScreen(QWidget):
     def __init__(
         self, role: str, controller: MarketplaceController | None = None,
         parent: QWidget | None = None,
+        invitation_controller: DirectInvitationController | None = None,
     ) -> None:
         super().__init__(parent)
         if role not in ("candidate", "company"):
@@ -84,7 +85,7 @@ class MarketplaceScreen(QWidget):
         self.setStyleSheet(STYLE)
         self.role = role
         self.controller = controller or MarketplaceController()
-        self.invitation_controller = DirectInvitationController()
+        self.invitation_controller = invitation_controller or DirectInvitationController()
         self.on_back = None
         self._jobs: list[dict] = []
         self._positions: list[dict] = []
