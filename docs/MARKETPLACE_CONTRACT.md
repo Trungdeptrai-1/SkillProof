@@ -9,12 +9,11 @@ Existing recruitment invitations are company-originated exam invitations, not Ca
 - Permission, migration and privacy integration tests.
 
 ## Limits
-- This foundation does not yet connect PySide6 or session-aware Services/Controllers.
+- Session-aware MarketplaceService and MarketplaceController are implemented. PySide6 screens are not connected yet.
 - Applications do not automatically create exam invitations.
 - SQLite currently supports local demo; multi-device sharing needs a later centralized backend.
 - Test only with temporary SQLite; never modify real user databases.
 
 ## Next phases
-- Session-aware Services and Controllers.
 - Candidate discovery/application UI and Company talent/applicant management UI.
 - Explicit mapping of applications to exam and interview lifecycle.
