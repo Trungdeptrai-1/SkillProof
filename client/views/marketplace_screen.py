@@ -161,6 +161,14 @@ class MarketplaceScreen(QWidget):
         mine_layout.addWidget(button("Rút đơn đã chọn", self._withdraw_selected))
         self.tabs.addTab(mine, "Đơn ứng tuyển của tôi")
 
+        saved = QWidget()
+        saved_layout = QVBoxLayout(saved)
+        saved_layout.addWidget(button("Làm mới việc làm đã lưu", self._load_saved_jobs))
+        self.saved_table = table(["ID", "Vị trí", "Công ty", "Địa điểm", "Trạng thái", "Đã ứng tuyển"])
+        saved_layout.addWidget(self.saved_table, 1)
+        saved_layout.addWidget(button("Bỏ lưu việc làm đã chọn", self._unsave_saved_job))
+        self.tabs.addTab(saved, "Việc làm đã lưu")
+
         privacy = QWidget()
         privacy_layout = QVBoxLayout(privacy)
         note = QLabel(
@@ -226,6 +234,7 @@ class MarketplaceScreen(QWidget):
         if self.role == "candidate":
             self._load_jobs()
             self._load_applications()
+            self._load_saved_jobs()
             privacy = self.controller.get_discoverable()
             if privacy.success:
                 self.visibility.setChecked(bool(privacy.data))
@@ -258,6 +267,7 @@ class MarketplaceScreen(QWidget):
             return
         if self._result(self.controller.save_job(jid), "Đã lưu vị trí."):
             self._load_jobs()
+            self._load_saved_jobs()
 
     def _unsave_selected(self) -> None:
         jid = selected_id(self.jobs_table)
@@ -266,6 +276,7 @@ class MarketplaceScreen(QWidget):
             return
         if self._result(self.controller.unsave_job(jid), "Đã bỏ lưu."):
             self._load_jobs()
+            self._load_saved_jobs()
 
     def _apply_selected(self) -> None:
         jid = selected_id(self.jobs_table)
@@ -278,6 +289,23 @@ class MarketplaceScreen(QWidget):
             self.cover_letter.clear()
             self._load_jobs()
             self._load_applications()
+
+    def _load_saved_jobs(self) -> None:
+        result = self.controller.saved_jobs()
+        if self._result(result):
+            populate(
+                self.saved_table, list(result.data),
+                ["id", "title", "company_name", "location", "status", "applied"],
+            )
+
+    def _unsave_saved_job(self) -> None:
+        job_id = selected_id(self.saved_table)
+        if job_id is None:
+            self.status.setText("Hãy chọn việc làm đã lưu.")
+            return
+        if self._result(self.controller.unsave_job(job_id), "Đã bỏ lưu việc làm."):
+            self._load_saved_jobs()
+            self._load_jobs()
 
     def _load_applications(self) -> None:
         result = self.controller.my_applications()
