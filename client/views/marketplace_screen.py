@@ -1,11 +1,11 @@
 """Two-way job marketplace screens. Data always comes from authenticated Controller."""
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QDateTime
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QLineEdit,
     QTextEdit, QTableWidget, QTableWidgetItem, QHeaderView, QComboBox,
-    QTabWidget, QMessageBox, QCheckBox, QAbstractItemView,
+    QTabWidget, QMessageBox, QCheckBox, QAbstractItemView, QDateTimeEdit,
 )
 from server.controllers.marketplace_controller import MarketplaceController
 from server.controllers.direct_invitation_controller import DirectInvitationController
@@ -217,7 +217,6 @@ class MarketplaceScreen(QWidget):
         self.stage.addItem("Đang xem xét", "reviewing")
         self.stage.addItem("Vào danh sách chọn", "shortlisted")
         self.stage.addItem("Mời đánh giá", "assessment")
-        self.stage.addItem("Mời phỏng vấn", "interview")
         self.stage.addItem("Đề nghị tuyển dụng", "offered")
         self.stage.addItem("Từ chối", "rejected")
         actions.addWidget(self.stage)
@@ -233,6 +232,24 @@ class MarketplaceScreen(QWidget):
             button("Mời ứng viên đã chọn làm bài", self._invite_selected_to_exam, True)
         )
         layout.addLayout(assessment_controls)
+        interview_controls = QHBoxLayout()
+        self.interview_title = QLineEdit()
+        self.interview_title.setPlaceholderText("Tên buổi phỏng vấn")
+        self.interview_title.setMaxLength(200)
+        self.interview_datetime = QDateTimeEdit()
+        self.interview_datetime.setCalendarPopup(True)
+        self.interview_datetime.setDisplayFormat("dd/MM/yyyy HH:mm")
+        self.interview_datetime.setDateTime(QDateTime.currentDateTime().addDays(1))
+        self.interview_url = QLineEdit()
+        self.interview_url.setPlaceholderText("Link họp https://... (tùy chọn)")
+        interview_controls.addWidget(self.interview_title, 2)
+        interview_controls.addWidget(self.interview_datetime, 1)
+        interview_controls.addWidget(self.interview_url, 2)
+        layout.addLayout(interview_controls)
+        layout.addWidget(button(
+            "Lên lịch phỏng vấn sau khi công bố kết quả thi",
+            self._schedule_selected_interview, True
+        ))
         self.tabs.addTab(applicants, "Hồ sơ ứng tuyển")
 
         talents = QWidget()
@@ -442,6 +459,32 @@ class MarketplaceScreen(QWidget):
             application_id, int(exam_id)
         )
         if self._result(result, "Đã gửi lời mời làm bài thi."):
+            self._load_applicants()
+
+    def _schedule_selected_interview(self) -> None:
+        application_id = selected_id(self.applicants_table)
+        if application_id is None:
+            self.status.setText("Chọn một hồ sơ đã hoàn thành đánh giá.")
+            return
+        status_item = self.applicants_table.item(self.applicants_table.currentRow(), 3)
+        if status_item is None or status_item.text() != "assessment":
+            self.status.setText("Chỉ lên lịch từ hồ sơ ở bước đánh giá năng lực.")
+            return
+        title = self.interview_title.text().strip()
+        if not title:
+            self.status.setText("Nhập tên buổi phỏng vấn.")
+            return
+        if QMessageBox.question(
+            self, "Xác nhận lịch phỏng vấn",
+            "Lên lịch phỏng vấn cho ứng viên được chọn?"
+        ) != QMessageBox.StandardButton.Yes:
+            return
+        scheduled_at = self.interview_datetime.dateTime().toString(Qt.DateFormat.ISODate)
+        result = self.controller.schedule_application_interview(
+            application_id, title, scheduled_at,
+            meeting_url=self.interview_url.text().strip() or None,
+        )
+        if self._result(result, "Đã lên lịch phỏng vấn. Ứng viên có thể xem trong mục Phỏng vấn."):
             self._load_applicants()
 
     def _load_talents(self) -> None:
