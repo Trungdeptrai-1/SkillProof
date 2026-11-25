@@ -3,13 +3,37 @@ import os
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from types import SimpleNamespace
+import gc
+import pytest
 
+from PySide6.QtCore import QCoreApplication, QEvent, QTimer
 from PySide6.QtWidgets import QApplication
 from client.views.marketplace_screen import MarketplaceScreen
 from client.views.dashboard_screen import DashboardScreen
 from server.models.user_model import UserModel
 
 APP = None
+_WIDGETS = []
+
+
+@pytest.fixture(scope="module", autouse=True)
+def cleanup_marketplace_qt():
+    """Keep Qt wrappers alive and drain deferred deletion before interpreter exit."""
+    yield
+    app = QApplication.instance()
+    if app is not None:
+        for widget in _WIDGETS:
+            animation = getattr(widget, "_anim", None)
+            if animation is not None:
+                animation.stop()
+            widget.close()
+            widget.deleteLater()
+        _WIDGETS.clear()
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        app.processEvents()
+        gc.collect()
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        app.processEvents()
 
 
 def qt_app():
@@ -97,6 +121,7 @@ def test_candidate_can_browse_and_save_from_ui():
     app = qt_app()
     controller = FakeMarketplaceController()
     screen = MarketplaceScreen("candidate", controller=controller, invitation_controller=FakeInvitations())
+    _WIDGETS.append(screen)
     assert screen.jobs_table.rowCount() == 1
     assert screen.visibility.isChecked()
     assert ("saved", ()) in controller.calls
@@ -111,6 +136,7 @@ def test_dashboard_marketplace_route_candidate_and_company():
     app = qt_app()
     for role in ("candidate", "company"):
         dashboard = DashboardScreen(make_user(role))
+        _WIDGETS.append(dashboard)
         calls = []
         dashboard.on_open_marketplace = lambda: calls.append(role)
         dashboard._sidebar._handle_open_marketplace()
