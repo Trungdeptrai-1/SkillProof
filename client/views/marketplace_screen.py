@@ -226,6 +226,9 @@ class MarketplaceScreen(QWidget):
         if self.role == "candidate":
             self._load_jobs()
             self._load_applications()
+            privacy = self.controller.get_discoverable()
+            if privacy.success:
+                self.visibility.setChecked(bool(privacy.data))
         else:
             self._load_positions()
             self._load_talents()
