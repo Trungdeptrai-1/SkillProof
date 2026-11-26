@@ -67,6 +67,12 @@ def test_company_feed_selection_and_direct_invite(monkeypatch):
     assert screen.talent_count.text() == "2 hồ sơ ứng viên công khai"
     assert screen.talent_name.text() == "Nguyễn Văn An"
     assert screen.talent_invite_button.isEnabled()
+    # Forms must retain usable dimensions inside an independently scrolling
+    # detail panel even at the standard desktop demo resolution.
+    assert screen.talent_detail_scroll.widget().minimumHeight() >= 615
+    assert screen.invite_position.minimumHeight() >= 44
+    assert screen.talent_message.minimumHeight() >= 92
+    assert screen.talent_avatar.size().width() == 72
 
     screen.talent_feed.setCurrentRow(1)
     assert screen.talent_name.text() == "Trần Thị Bình"
