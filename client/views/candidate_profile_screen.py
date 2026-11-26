@@ -87,9 +87,10 @@ class CandidateProfileScreen(QWidget):
         scroll.setStyleSheet(f"QScrollArea{{border:none;background:{COLOR_OFF_WHITE};}}")
 
         content = QWidget()
-        content.setStyleSheet(f"background:{COLOR_OFF_WHITE};")
+        content.setObjectName("ProfileContent")
+        content.setStyleSheet(f"QWidget#ProfileContent {{ background:{COLOR_OFF_WHITE}; }}")
         self._content_layout = QVBoxLayout(content)
-        self._content_layout.setContentsMargins(32, 28, 32, 28)
+        self._content_layout.setContentsMargins(36, 32, 36, 32)
         self._content_layout.setSpacing(0)
 
         self._build_header()
@@ -105,9 +106,10 @@ class CandidateProfileScreen(QWidget):
 
     def _make_sidebar(self) -> QWidget:
         sidebar = QWidget()
-        sidebar.setFixedWidth(240)
+        sidebar.setFixedWidth(252)
+        sidebar.setObjectName("ProfileSidebar")
         sidebar.setStyleSheet(f"""
-            QWidget {{
+            QWidget#ProfileSidebar {{
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
                     stop:0 {COLOR_NAVY_DARK}, stop:1 {COLOR_NAVY_MID});
             }}
@@ -121,7 +123,8 @@ class CandidateProfileScreen(QWidget):
         logo_row = QHBoxLayout()
         logo_box = QWidget()
         logo_box.setFixedSize(36, 36)
-        logo_box.setStyleSheet(f"background:{COLOR_ACCENT};border-radius:10px;")
+        logo_box.setObjectName("ProfileBrand")
+        logo_box.setStyleSheet(f"QWidget#ProfileBrand {{ background:{COLOR_ACCENT};border-radius:10px; }}")
         ll = QVBoxLayout(logo_box); ll.setContentsMargins(0, 0, 0, 0)
         lbl = QLabel("✓")
         lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -143,31 +146,11 @@ class CandidateProfileScreen(QWidget):
         layout.addWidget(div)
         layout.addSpacing(20)
 
-        # Menu items
-        for icon, text, active in [
-            ("👤", "Hồ sơ ứng viên", True),
-            ("🏅", "Kỹ năng của tôi", False),
-            ("📜", "Chứng chỉ", False),
-            ("🎯", "Đánh giá", False),
-            ("🔎", "Khám phá cơ hội", False),
-        ]:
-            btn = QPushButton(f"  {icon}  {text}")
-            btn.setFixedHeight(38)
-            bg = "rgba(46,134,222,0.2)" if active else "transparent"
-            color = COLOR_WHITE if active else "rgba(255,255,255,0.75)"
-            btn.setStyleSheet(f"""
-                QPushButton {{
-                    background: {bg}; color: {color};
-                    border: none; border-radius: 8px;
-                    font-size: 12px; text-align: left; padding-left: 8px;
-                }}
-                QPushButton:hover {{
-                    background: rgba(255,255,255,0.1); color: {COLOR_WHITE};
-                }}
-            """)
-            layout.addWidget(btn)
-            layout.addSpacing(4)
-
+        # Do not render navigation buttons without a click handler.
+        section_label = QLabel("HỒ SƠ ỨNG VIÊN")
+        section_label.setStyleSheet("QLabel { color: #D4E5F7; font-size: 11px; font-weight: 700; background: transparent; border: none; }")
+        layout.addWidget(section_label)
+        layout.addSpacing(14)
         layout.addStretch()
 
         # Back button
