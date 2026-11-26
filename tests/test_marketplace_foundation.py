@@ -422,3 +422,26 @@ def test_mig014_is_idempotent_and_replies_cannot_be_overwritten_in_sql(market):
             (app["id"],),
         )
     assert repo.my_applications(candidate)[0]["offer_response"] == "accepted"
+
+
+def test_mig014_disallows_reply_without_an_employer_offer(market):
+    conn, repo, company, _, candidate, _, job, _ = market
+    application = repo.apply(candidate, job)
+    assert application
+    interview_id = conn.execute(
+        """INSERT INTO interviews(candidate_id,company_id,title,scheduled_at)
+           VALUES(?,?,?,'2099-12-01T10:00:00')""",
+        (candidate, company, "Interview"),
+    ).lastrowid
+    conn.execute(
+        "INSERT INTO application_interviews(application_id,interview_id) VALUES(?,?)",
+        (application["id"], interview_id),
+    )
+    with pytest.raises(sqlite3.IntegrityError):
+        conn.execute(
+            """UPDATE application_interviews
+               SET offer_response='accepted',offer_responded_at='2099-12-02'
+               WHERE application_id=?""",
+            (application["id"],),
+        )
+    assert repo.respond_to_offer(candidate, application["id"], True) is None
