@@ -334,3 +334,91 @@ def test_interview_link_rejects_mismatched_candidate_and_company(market):
             (app["id"], wrong_candidate_interview),
         )
     assert conn.execute("SELECT count(*) FROM application_interviews").fetchone()[0] == 0
+
+
+def test_offer_response_is_private_final_and_visible_to_both_parties(market):
+    conn, repo, company, other, candidate, second, job, _ = market
+    app = repo.apply(candidate, job)
+    assert app
+    interview = conn.execute(
+        """INSERT INTO interviews(candidate_id,company_id,title,scheduled_at,status)
+           VALUES(?,?,?,'2099-12-01T10:00:00','completed')""",
+        (candidate, company, "Hiring interview"),
+    ).lastrowid
+    conn.execute(
+        "INSERT INTO application_interviews(application_id,interview_id) VALUES(?,?)",
+        (app["id"], interview),
+    )
+    conn.execute("UPDATE job_applications SET status='interview' WHERE id=?", (app["id"],))
+    conn.commit()
+    assert repo.decide_after_interview(company, app["id"], "offered", "Welcome aboard")
+    assert repo.respond_to_offer(second, app["id"], True) is None
+    assert repo.respond_to_offer(company, app["id"], True) is None
+    assert repo.respond_to_offer(candidate, app["id"], "yes") is None
+    answer = repo.respond_to_offer(candidate, app["id"], True)
+    assert answer and answer["offer_response"] == "accepted"
+    assert answer["offer_responded_at"] is not None
+    assert repo.respond_to_offer(candidate, app["id"], False) is None
+    mine = repo.my_applications(candidate)
+    assert mine[0]["status"] == "offered"  # Company decision remains intact.
+    assert mine[0]["offer_response"] == "accepted"
+    assert mine[0]["decision_note"] == "Welcome aboard"
+    assert repo.my_applications(second) == []
+    assert repo.applicants(company, job)[0]["offer_response"] == "accepted"
+    assert repo.applicants(other, job) == []
+
+
+def test_candidate_can_decline_offer_but_cannot_answer_a_rejection(market):
+    conn, repo, company, _, candidate, second, job, _ = market
+    app1 = repo.apply(candidate, job)
+    app2 = repo.apply(second, job)
+    assert app1 and app2
+    for app, person, decision in (
+        (app1, candidate, "offered"),
+        (app2, second, "rejected"),
+    ):
+        interview = conn.execute(
+            """INSERT INTO interviews(candidate_id,company_id,title,scheduled_at,status)
+               VALUES(?,?,?,'2099-12-01T10:00:00','completed')""",
+            (person, company, "Interview"),
+        ).lastrowid
+        conn.execute(
+            "INSERT INTO application_interviews(application_id,interview_id) VALUES(?,?)",
+            (app["id"], interview),
+        )
+        conn.execute("UPDATE job_applications SET status='interview' WHERE id=?", (app["id"],))
+        conn.commit()
+        assert repo.decide_after_interview(company, app["id"], decision)
+    assert repo.respond_to_offer(candidate, app1["id"], False)["offer_response"] == "declined"
+    assert repo.respond_to_offer(second, app2["id"], True) is None
+    assert repo.my_applications(second)[0]["offer_response"] is None
+
+
+def test_mig014_is_idempotent_and_replies_cannot_be_overwritten_in_sql(market):
+    from server.database.offer_response_migration import migrate_offer_responses
+    conn, repo, company, _, candidate, _, job, _ = market
+    migrate_offer_responses(conn)
+    migrate_offer_responses(conn)
+    fields = {field[1] for field in conn.execute("PRAGMA table_info(application_interviews)")}
+    assert {"offer_response", "offer_responded_at"} <= fields
+    app = repo.apply(candidate, job)
+    assert app
+    iv = conn.execute(
+        """INSERT INTO interviews(candidate_id,company_id,title,scheduled_at,status)
+           VALUES(?,?,?,'2099-12-01T10:00:00','completed')""",
+        (candidate, company, "Interview"),
+    ).lastrowid
+    conn.execute(
+        "INSERT INTO application_interviews(application_id,interview_id) VALUES(?,?)",
+        (app["id"], iv),
+    )
+    conn.execute("UPDATE job_applications SET status='interview' WHERE id=?", (app["id"],))
+    conn.commit()
+    assert repo.decide_after_interview(company, app["id"], "offered")
+    assert repo.respond_to_offer(candidate, app["id"], True)
+    with pytest.raises(sqlite3.IntegrityError):
+        conn.execute(
+            "UPDATE application_interviews SET offer_response='declined' WHERE application_id=?",
+            (app["id"],),
+        )
+    assert repo.my_applications(candidate)[0]["offer_response"] == "accepted"
