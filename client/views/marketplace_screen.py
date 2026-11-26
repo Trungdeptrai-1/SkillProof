@@ -478,6 +478,12 @@ class MarketplaceScreen(QWidget):
         panel_layout.addWidget(invite_heading)
         panel_layout.addWidget(QLabel("Vị trí tuyển dụng"))
         self.invite_position = QComboBox()
+        self.invite_position.currentIndexChanged.connect(
+            lambda *_: self._refresh_talent_detail(
+                self._talents[self.talent_feed.currentRow()]
+                if 0 <= self.talent_feed.currentRow() < len(self._talents) else None
+            )
+        )
         panel_layout.addWidget(self.invite_position)
         self.talent_message = QTextEdit()
         self.talent_message.setMaximumHeight(100)
