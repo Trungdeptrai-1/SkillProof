@@ -1,11 +1,12 @@
 """Two-way job marketplace screens. Data always comes from authenticated Controller."""
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, QDateTime
+from PySide6.QtCore import Qt, QDateTime, QSize
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QLineEdit,
     QTextEdit, QTableWidget, QTableWidgetItem, QHeaderView, QComboBox,
     QTabWidget, QMessageBox, QCheckBox, QAbstractItemView, QDateTimeEdit,
+    QListWidget, QListWidgetItem, QFrame, QSizePolicy,
 )
 from server.controllers.marketplace_controller import MarketplaceController
 from server.controllers.direct_invitation_controller import DirectInvitationController
@@ -36,6 +37,14 @@ QTabBar::tab { background: transparent; color: #64748B; padding: 13px 18px;
     border: none; border-bottom: 2px solid transparent; }
 QTabBar::tab:hover { color: #1E4D7B; }
 QTabBar::tab:selected { color: #1D4ED8; border-bottom: 2px solid #3185D9; font-weight: 700; }
+QListWidget#JobCards { background: transparent; border: none; outline: none; }
+QListWidget#JobCards::item { background: white; border: 1px solid #DCE5F1;
+    border-radius: 12px; padding: 13px 15px; margin-bottom: 9px; color: #172B4D; }
+QListWidget#JobCards::item:hover { border: 1px solid #93B9EE; background: #F6FAFF; }
+QListWidget#JobCards::item:selected { background: #EAF3FF; color: #102D4D;
+    border: 2px solid #3284D7; }
+QFrame#JobDetailPanel { background: white; border: 1px solid #DCE5F1; border-radius: 14px; }
+QLabel#JobDetailTitle { font-size: 17px; font-weight: 700; color: #102C4D; }
 """
 
 
@@ -145,25 +154,62 @@ class MarketplaceScreen(QWidget):
         filters.addWidget(button("Tìm kiếm", self._load_jobs, True))
         layout.addLayout(filters)
 
+        # Keep the canonical selection table for controller logic and existing tests.
+        # The user-facing browse experience is a two-column job board instead.
         self.jobs_table = table(["ID", "Vị trí", "Công ty", "Địa điểm", "Đã lưu", "Đã ứng tuyển"])
         self.jobs_table.itemSelectionChanged.connect(self._job_selected)
-        layout.addWidget(self.jobs_table, 1)
+
+        columns = QHBoxLayout()
+        columns.setSpacing(18)
+        cards_panel = QWidget()
+        cards_layout = QVBoxLayout(cards_panel)
+        cards_layout.setContentsMargins(0, 0, 0, 0)
+        cards_layout.setSpacing(8)
+        cards_title = QLabel("Cơ hội tuyển dụng")
+        cards_title.setObjectName("SectionTitle")
+        cards_layout.addWidget(cards_title)
+        self.job_cards = QListWidget()
+        self.job_cards.setObjectName("JobCards")
+        self.job_cards.setSpacing(4)
+        self.job_cards.setWordWrap(True)
+        self.job_cards.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.job_cards.itemSelectionChanged.connect(self._card_selected)
+        cards_layout.addWidget(self.job_cards, 1)
+        columns.addWidget(cards_panel, 4)
+
+        details_panel = QFrame()
+        details_panel.setObjectName("JobDetailPanel")
+        detail_layout = QVBoxLayout(details_panel)
+        detail_layout.setContentsMargins(22, 20, 22, 20)
+        detail_layout.setSpacing(12)
+        self.job_heading = QLabel("Chọn một công việc")
+        self.job_heading.setObjectName("JobDetailTitle")
+        self.job_heading.setWordWrap(True)
+        detail_layout.addWidget(self.job_heading)
+        self.job_subtitle = QLabel("Thông tin công ty và vị trí sẽ hiển thị ở đây.")
+        self.job_subtitle.setObjectName("Status")
+        self.job_subtitle.setWordWrap(True)
+        detail_layout.addWidget(self.job_subtitle)
         self.details = QTextEdit()
         self.details.setReadOnly(True)
         self.details.setPlaceholderText("Chọn một vị trí để xem mô tả và yêu cầu.")
-        self.details.setMinimumHeight(128)
-        self.details.setMaximumHeight(190)
-        layout.addWidget(self.details)
+        self.details.setMinimumHeight(160)
+        detail_layout.addWidget(self.details, 1)
+        cover_label = QLabel("Thư giới thiệu (không bắt buộc)")
+        cover_label.setObjectName("SectionTitle")
+        detail_layout.addWidget(cover_label)
         self.cover_letter = QTextEdit()
-        self.cover_letter.setPlaceholderText("Lời giới thiệu khi ứng tuyển (không bắt buộc, tối đa 4000 ký tự)")
-        self.cover_letter.setMaximumHeight(100)
-        layout.addWidget(self.cover_letter)
+        self.cover_letter.setPlaceholderText("Giới thiệu ngắn về kinh nghiệm và lý do bạn phù hợp (tối đa 4000 ký tự)")
+        self.cover_letter.setMaximumHeight(105)
+        detail_layout.addWidget(self.cover_letter)
         actions = QHBoxLayout()
-        actions.addWidget(button("Lưu việc làm", self._save_selected))
+        actions.addWidget(button("Lưu", self._save_selected))
         actions.addWidget(button("Bỏ lưu", self._unsave_selected))
         actions.addStretch()
         actions.addWidget(button("Ứng tuyển ngay", self._apply_selected, True))
-        layout.addLayout(actions)
+        detail_layout.addLayout(actions)
+        columns.addWidget(details_panel, 6)
+        layout.addLayout(columns, 1)
         self.tabs.addTab(explore, "Khám phá việc làm")
 
         mine = QWidget()
@@ -335,11 +381,45 @@ class MarketplaceScreen(QWidget):
             self._jobs = list(result.data)
             self.jobs_table.setRowCount(0)
             populate(self.jobs_table, self._jobs, ["id", "title", "company_name", "location", "saved", "applied"])
+            self.job_cards.blockSignals(True)
+            self.job_cards.clear()
+            for job in self._jobs:
+                markers = []
+                if job.get("saved"):
+                    markers.append("Đã lưu")
+                if job.get("applied"):
+                    markers.append("Đã ứng tuyển")
+                state = "  •  ".join(markers)
+                title = str(job.get("title") or "Vị trí tuyển dụng")
+                company = str(job.get("company_name") or "Doanh nghiệp")
+                location = str(job.get("location") or "Chưa cập nhật địa điểm")
+                card_text = f"{title}\\n{company}  •  {location}"
+                if state:
+                    card_text += f"\\n{state}"
+                item = QListWidgetItem(card_text)
+                self.job_cards.addItem(item)
+                item.setSizeHint(QSize(240, 88))
+            self.job_cards.blockSignals(False)
+            if self._jobs:
+                self.job_cards.setCurrentRow(0)
+            else:
+                self.job_heading.setText("Chưa có vị trí phù hợp")
+                self.job_subtitle.setText("Thử tìm kiếm với từ khóa hoặc địa điểm khác.")
+                self.details.clear()
             self.status.setText(f"Tìm thấy {len(self._jobs)} vị trí tuyển dụng công khai.")
+
+    def _card_selected(self) -> None:
+        row = self.job_cards.currentRow()
+        if row >= 0 and row < self.jobs_table.rowCount():
+            self.jobs_table.selectRow(row)
+            self._job_selected()
 
     def _job_selected(self) -> None:
         jid = selected_id(self.jobs_table)
         job = next((item for item in self._jobs if item["id"] == jid), None)
+        if job:
+            self.job_heading.setText(str(job.get("title") or "Vị trí tuyển dụng"))
+            self.job_subtitle.setText(f"{job.get('company_name') or 'Doanh nghiệp'}  •  {job.get('location') or 'Chưa cập nhật địa điểm'}")
         self.details.setPlainText(
             f"{job['title']} — {job['company_name']}\n\n"
             f"Mô tả: {job.get('description') or 'Chưa cập nhật'}\n"
