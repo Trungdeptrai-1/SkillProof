@@ -78,7 +78,8 @@ class ExpertProfileScreen(QWidget):
         scroll.setStyleSheet(f"QScrollArea{{border:none;background:{COLOR_OFF_WHITE};}}")
 
         content = QWidget()
-        content.setStyleSheet(f"background:{COLOR_OFF_WHITE};")
+        content.setObjectName("ProfileContent")
+        content.setStyleSheet(f"QWidget#ProfileContent {{ background:{COLOR_OFF_WHITE}; }}")
         self._cl = QVBoxLayout(content)
         self._cl.setContentsMargins(32, 28, 32, 28)
         self._cl.setSpacing(0)
@@ -94,9 +95,10 @@ class ExpertProfileScreen(QWidget):
 
     def _make_sidebar(self) -> QWidget:
         sb = QWidget()
-        sb.setFixedWidth(240)
+        sb.setFixedWidth(252)
+        sb.setObjectName("ProfileSidebar")
         sb.setStyleSheet(f"""
-            QWidget {{
+            QWidget#ProfileSidebar {{
                 background: qlineargradient(x1:0,y1:0,x2:0,y2:1,
                     stop:0 {COLOR_NAVY_DARK}, stop:1 {COLOR_NAVY_MID});
             }}
@@ -108,7 +110,7 @@ class ExpertProfileScreen(QWidget):
         # Logo
         logo_row = QHBoxLayout()
         lb = QWidget(); lb.setFixedSize(36, 36)
-        lb.setStyleSheet(f"background:{COLOR_ACCENT};border-radius:10px;")
+        lb.setObjectName("ProfileBrand"); lb.setStyleSheet(f"QWidget#ProfileBrand {{ background:{COLOR_ACCENT};border-radius:10px; }}")
         ll = QVBoxLayout(lb); ll.setContentsMargins(0,0,0,0)
         li = QLabel("✓"); li.setAlignment(Qt.AlignmentFlag.AlignCenter)
         li.setStyleSheet(f"color:{COLOR_WHITE};font-size:18px;font-weight:700;background:transparent;")
@@ -124,27 +126,11 @@ class ExpertProfileScreen(QWidget):
         div.setStyleSheet("color: rgba(255,255,255,0.15);")
         lay.addWidget(div); lay.addSpacing(20)
 
-        for icon, text, active in [
-            ("🏆", "Hồ sơ chuyên gia", True),
-            ("📋", "Ngân hàng câu hỏi", False),
-            ("🎯", "Đánh giá & Chấm điểm", False),
-            ("🤝", "Phỏng vấn", False),
-            ("📊", "Thống kê", False),
-        ]:
-            btn = QPushButton(f"  {icon}  {text}")
-            btn.setFixedHeight(38)
-            bg = "rgba(46,134,222,0.2)" if active else "transparent"
-            clr = COLOR_WHITE if active else "rgba(255,255,255,0.75)"
-            btn.setStyleSheet(f"""
-                QPushButton {{
-                    background:{bg}; color:{clr};
-                    border:none; border-radius:8px;
-                    font-size:12px; text-align:left; padding-left:8px;
-                }}
-                QPushButton:hover {{ background:rgba(255,255,255,0.1); color:{COLOR_WHITE}; }}
-            """)
-            lay.addWidget(btn); lay.addSpacing(4)
-
+        section_label = QLabel("HỒ SƠ CHUYÊN GIA")
+        section_label.setStyleSheet("QLabel { color: #D4E5F7; font-size: 11px; font-weight: 700; background: transparent; border: none; }")
+        lay.addWidget(section_label)
+        lay.addSpacing(14)
+        # Navigation is handled by MainWindow; no dead-end menu buttons.
         lay.addStretch()
 
         back_btn = QPushButton("  ←  Quay lại Dashboard")
@@ -164,7 +150,8 @@ class ExpertProfileScreen(QWidget):
 
     def _build_header(self) -> None:
         hdr = QFrame()
-        hdr.setStyleSheet(f"QFrame{{background:{COLOR_WHITE};border-radius:12px;border:1px solid {COLOR_LIGHT_GRAY};}}")
+        hdr.setObjectName("UiPanel_hdr")
+        hdr.setStyleSheet(f"QFrame#UiPanel_hdr{{background:{COLOR_WHITE};border-radius:12px;border:1px solid {COLOR_LIGHT_GRAY};}}")
         hl = QHBoxLayout(hdr); hl.setContentsMargins(24, 20, 24, 20)
         left = QVBoxLayout()
         t = QLabel("Hồ sơ chuyên gia")
@@ -194,7 +181,8 @@ class ExpertProfileScreen(QWidget):
     def _build_account_card(self) -> None:
         """Thông tin tài khoản (read-only: họ tên, email)."""
         card = QFrame()
-        card.setStyleSheet(f"QFrame{{background:{COLOR_WHITE};border-radius:12px;border:1px solid {COLOR_LIGHT_GRAY};}}")
+        card.setObjectName("UiPanel_card")
+        card.setStyleSheet(f"QFrame#UiPanel_card{{background:{COLOR_WHITE};border-radius:12px;border:1px solid {COLOR_LIGHT_GRAY};}}")
         cl = QVBoxLayout(card); cl.setContentsMargins(24, 20, 24, 20); cl.setSpacing(0)
         t = QLabel("Thông tin tài khoản")
         t.setStyleSheet(f"color:{COLOR_NAVY_DARK};font-size:15px;font-weight:700;")
@@ -213,7 +201,8 @@ class ExpertProfileScreen(QWidget):
 
     def _build_form_card(self) -> None:
         self._card = QFrame()
-        self._card.setStyleSheet(f"QFrame{{background:{COLOR_WHITE};border-radius:12px;border:1px solid {COLOR_LIGHT_GRAY};}}")
+        self._card.setObjectName("UiPanel_card")
+        card.setStyleSheet(f"QFrame#UiPanel_card{{background:{COLOR_WHITE};border-radius:12px;border:1px solid {COLOR_LIGHT_GRAY};}}")
         cl = QVBoxLayout(self._card); cl.setContentsMargins(24, 20, 24, 20); cl.setSpacing(0)
 
         self._card_title = QLabel("Thông tin chuyên môn")
