@@ -23,6 +23,10 @@ class FakeMarketplace:
         self.calls.append(("browse", args))
         return [{"id": 3}]
 
+    def respond_to_offer(self, *args):
+        self.calls.append(("offer_reply", args))
+        return {"offer_response": "accepted" if args[-1] else "declined"}
+
     def apply(self, *args):
         self.calls.append(("apply", args))
         return {"id": 5}
@@ -82,3 +86,16 @@ def test_validation_before_repository_access(controller):
     assert ctl.browse_jobs(123).status == "invalid_input"
     assert ctl.set_discoverable("yes").status == "invalid_input"
     assert repo.calls == []
+
+
+def test_offer_reply_is_session_scoped_and_validated(controller):
+    ctl, repo, session = controller
+    assert ctl.respond_to_offer(9, True).status == "not_logged_in"
+    session.start_session(user(22, "company"))
+    assert ctl.respond_to_offer(9, True).status == "wrong_role"
+    session.end_session()
+    session.start_session(user(11, "candidate"))
+    assert ctl.respond_to_offer(True, True).status == "invalid_input"
+    assert ctl.respond_to_offer(9, 1).status == "invalid_input"
+    assert ctl.respond_to_offer(9, False).success
+    assert repo.calls[-1] == ("offer_reply", (11, 9, False))
