@@ -6,7 +6,7 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QLineEdit,
     QTextEdit, QTableWidget, QTableWidgetItem, QHeaderView, QComboBox,
     QTabWidget, QMessageBox, QCheckBox, QAbstractItemView, QDateTimeEdit,
-    QListWidget, QListWidgetItem, QFrame, QSizePolicy,
+    QListWidget, QListWidgetItem, QFrame, QSizePolicy, QScrollArea,
 )
 from server.controllers.marketplace_controller import MarketplaceController
 from server.controllers.direct_invitation_controller import DirectInvitationController
@@ -57,6 +57,8 @@ QLabel#TalentCardHeadline { font-size: 13px; font-weight: 600; color: #2E68A8; }
 QLabel#TalentCardMeta { font-size: 12px; color: #4C647D; }
 QLabel#TalentCardBio { font-size: 12px; color: #677A91; }
 QFrame#TalentDetailPanel { background: #FFFFFF; border: 1px solid #DEE7F2; border-radius: 14px; }
+QScrollArea#TalentDetailsScroll { background: transparent; border: none; }
+QWidget#TalentProfileHeader { background: transparent; border: none; }
 QLabel#TalentDetailName { font-size: 22px; font-weight: 700; color: #122B49; }
 QLabel#TalentDetailHeadline { font-size: 14px; color: #2E68A8; font-weight: 600; }
 QLabel#TalentDetailMeta { font-size: 12px; color: #66778F; }
@@ -442,26 +444,50 @@ class MarketplaceScreen(QWidget):
         listing.addWidget(self.talent_feed, 1)
         columns.addLayout(listing, 5)
 
+        # The detail form must scroll independently of the candidate feed.
+        # Without an internal scroll area Qt compresses the avatar, text edits,
+        # and combo boxes into each other on normal laptop screen heights.
+        detail_scroll = QScrollArea()
+        detail_scroll.setObjectName("TalentDetailsScroll")
+        detail_scroll.setWidgetResizable(True)
+        detail_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        detail_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self.talent_detail_scroll = detail_scroll
+
         panel = QFrame()
         panel.setObjectName("TalentDetailPanel")
+        panel.setMinimumHeight(615)
         panel_layout = QVBoxLayout(panel)
-        panel_layout.setContentsMargins(24, 24, 24, 24)
-        panel_layout.setSpacing(11)
+        panel_layout.setContentsMargins(22, 22, 22, 22)
+        panel_layout.setSpacing(12)
+
+        identity = QWidget()
+        identity.setObjectName("TalentProfileHeader")
+        identity_layout = QHBoxLayout(identity)
+        identity_layout.setContentsMargins(0, 0, 0, 0)
+        identity_layout.setSpacing(16)
+
         self.talent_avatar = QLabel()
-        self.talent_avatar.setFixedSize(80, 80)
-        self.talent_avatar.setPixmap(candidate_avatar("Ứng viên", 80))
-        panel_layout.addWidget(self.talent_avatar)
+        self.talent_avatar.setFixedSize(72, 72)
+        self.talent_avatar.setPixmap(candidate_avatar("Ứng viên", 72))
+        identity_layout.addWidget(self.talent_avatar, 0, Qt.AlignmentFlag.AlignTop)
+
+        name_column = QVBoxLayout()
+        name_column.setSpacing(5)
         self.talent_name = QLabel("Chọn hồ sơ ứng viên")
         self.talent_name.setObjectName("TalentDetailName")
         self.talent_name.setWordWrap(True)
-        panel_layout.addWidget(self.talent_name)
+        self.talent_name.setMinimumHeight(30)
+        name_column.addWidget(self.talent_name)
         self.talent_headline = QLabel("Thông tin nghề nghiệp được công khai sẽ xuất hiện tại đây.")
         self.talent_headline.setObjectName("TalentDetailHeadline")
         self.talent_headline.setWordWrap(True)
-        panel_layout.addWidget(self.talent_headline)
+        name_column.addWidget(self.talent_headline)
         self.talent_experience = QLabel("")
         self.talent_experience.setObjectName("TalentDetailMeta")
-        panel_layout.addWidget(self.talent_experience)
+        name_column.addWidget(self.talent_experience)
+        identity_layout.addLayout(name_column, 1)
+        panel_layout.addWidget(identity)
 
         about_title = QLabel("Giới thiệu bản thân")
         about_title.setObjectName("SectionTitle")
@@ -478,6 +504,8 @@ class MarketplaceScreen(QWidget):
         panel_layout.addWidget(invite_heading)
         panel_layout.addWidget(QLabel("Vị trí tuyển dụng"))
         self.invite_position = QComboBox()
+        self.invite_position.setMinimumHeight(44)
+        self.invite_position.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.invite_position.currentIndexChanged.connect(
             lambda *_: self._refresh_talent_detail(
                 self._talents[self.talent_feed.currentRow()]
@@ -486,7 +514,9 @@ class MarketplaceScreen(QWidget):
         )
         panel_layout.addWidget(self.invite_position)
         self.talent_message = QTextEdit()
-        self.talent_message.setMaximumHeight(100)
+        self.talent_message.setMinimumHeight(92)
+        self.talent_message.setMaximumHeight(110)
+        self.talent_message.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.talent_message.setPlaceholderText("Lời mời giới thiệu vị trí và lý do bạn muốn kết nối (không bắt buộc)")
         self.talent_message.textChanged.connect(self._limit_talent_message)
         panel_layout.addWidget(self.talent_message)
@@ -499,9 +529,11 @@ class MarketplaceScreen(QWidget):
         )
         self.talent_privacy.setObjectName("TalentDetailMeta")
         self.talent_privacy.setWordWrap(True)
+        panel_layout.addSpacing(6)
         panel_layout.addWidget(self.talent_privacy)
-        panel_layout.addStretch()
-        columns.addWidget(panel, 4)
+        panel_layout.addStretch(1)
+        detail_scroll.setWidget(panel)
+        columns.addWidget(detail_scroll, 4)
         talent_layout.addLayout(columns, 1)
         self._refresh_talent_detail(None)
         self.tabs.addTab(talents, "Khám phá nhân tài")
@@ -826,7 +858,7 @@ class MarketplaceScreen(QWidget):
         selected = candidate is not None
         name = str(candidate.get("full_name") or "Ứng viên") if selected else "Chọn hồ sơ ứng viên"
         self.talent_name.setText(name)
-        self.talent_avatar.setPixmap(candidate_avatar(name, 80))
+        self.talent_avatar.setPixmap(candidate_avatar(name, 72))
         self.talent_headline.setText(
             str(candidate.get("headline") or "Chưa cập nhật chuyên môn")
             if selected else "Chọn một thẻ hồ sơ để xem thông tin chuyên môn."
