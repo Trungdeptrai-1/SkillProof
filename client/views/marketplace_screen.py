@@ -86,6 +86,8 @@ def populate(widget: QTableWidget, rows: list[dict], columns: list[str]) -> None
                 "applied": "Đã ứng tuyển",
                 "reviewing": "Đang xem xét",
                 "shortlisted": "Vào danh sách chọn",
+                "assessment": "Đang đánh giá",
+                "interview": "Đang phỏng vấn",
                 "rejected": "Đã từ chối",
                 "withdrawn": "Đã rút đơn",
                 "offered": "Đã gửi đề nghị",
@@ -628,7 +630,7 @@ class MarketplaceScreen(QWidget):
             return
         row = self.applicants_table.currentRow()
         status_item = self.applicants_table.item(row, 3)
-        if status_item is None or status_item.text() != "shortlisted":
+        if status_item is None or (status_item.data(Qt.ItemDataRole.UserRole + 1) or status_item.text()) != "shortlisted":
             self.status.setText("Chỉ gửi bài thi sau khi đưa ứng viên vào danh sách chọn.")
             return
         if QMessageBox.question(
@@ -648,7 +650,7 @@ class MarketplaceScreen(QWidget):
             self.status.setText("Chọn một hồ sơ đã hoàn thành đánh giá.")
             return
         status_item = self.applicants_table.item(self.applicants_table.currentRow(), 3)
-        if status_item is None or status_item.text() != "assessment":
+        if status_item is None or (status_item.data(Qt.ItemDataRole.UserRole + 1) or status_item.text()) != "assessment":
             self.status.setText("Chỉ lên lịch từ hồ sơ ở bước đánh giá năng lực.")
             return
         title = self.interview_title.text().strip()
@@ -675,7 +677,7 @@ class MarketplaceScreen(QWidget):
             return
         row = self.applicants_table.currentRow()
         stage_item = self.applicants_table.item(row, 3)
-        if stage_item is None or stage_item.text() != "interview":
+        if stage_item is None or (stage_item.data(Qt.ItemDataRole.UserRole + 1) or stage_item.text()) != "interview":
             self.status.setText("Chỉ ra quyết định cuối cùng từ hồ sơ đang phỏng vấn.")
             return
         label = "Đề nghị tuyển dụng" if decision == "offered" else "Từ chối ứng viên"
