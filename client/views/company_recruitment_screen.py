@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
     QComboBox,
     QFormLayout,
     QHBoxLayout,
+    QHeaderView,
     QLabel,
     QLineEdit,
     QPushButton,
@@ -142,6 +143,18 @@ class CompanyRecruitmentScreen(QWidget):
         layout.addWidget(self._positions_status)
         self._positions_table = self._make_table(
             ["Mã", "Vị trí", "Địa điểm", "Trạng thái"]
+        )
+        self._positions_table.horizontalHeader().setSectionResizeMode(
+            0, QHeaderView.ResizeMode.ResizeToContents
+        )
+        self._positions_table.horizontalHeader().setSectionResizeMode(
+            1, QHeaderView.ResizeMode.Stretch
+        )
+        self._positions_table.horizontalHeader().setSectionResizeMode(
+            2, QHeaderView.ResizeMode.Stretch
+        )
+        self._positions_table.horizontalHeader().setSectionResizeMode(
+            3, QHeaderView.ResizeMode.ResizeToContents
         )
         self._positions_table.itemSelectionChanged.connect(
             self._position_selection_changed
@@ -342,7 +355,14 @@ class CompanyRecruitmentScreen(QWidget):
         table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        table.horizontalHeader().setStretchLastSection(True)
+        header = table.horizontalHeader()
+        header.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        header.setMinimumSectionSize(90)
+        table.verticalHeader().setVisible(False)
+        table.verticalHeader().setDefaultSectionSize(42)
+        table.setAlternatingRowColors(True)
+        table.setWordWrap(False)
+        table.setShowGrid(False)
         return table
 
     def _set_unavailable(self) -> None:
@@ -608,7 +628,11 @@ class CompanyRecruitmentScreen(QWidget):
                 str(position.id),
                 position.title,
                 position.location,
-                position.status,
+                {
+                    "draft": "Bản nháp",
+                    "published": "Đang tuyển",
+                    "closed": "Đã đóng",
+                }.get(position.status, position.status),
             )
             for column, value in enumerate(values):
                 item = QTableWidgetItem(value)
@@ -659,7 +683,12 @@ class CompanyRecruitmentScreen(QWidget):
                 result.position_title,
                 result.assessment_title,
                 score,
-                result.status,
+                {
+                    "pending": "Đang chờ",
+                    "completed": "Đã hoàn thành",
+                    "graded": "Đã chấm",
+                    "published": "Đã công bố",
+                }.get(result.status, result.status),
                 result.submitted_at,
             )
             for column, value in enumerate(values):
