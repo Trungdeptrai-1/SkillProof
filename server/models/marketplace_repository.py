@@ -90,6 +90,7 @@ class MarketplaceRepository:
                 """SELECT ja.id,ja.job_posting_id,ja.status,ja.applied_at,
                           ja.updated_at,jp.title, jp.location,
                           ai.decision_note, ai.decided_at,
+                          ai.offer_response, ai.offer_responded_at,
                           COALESCE(cp.company_name,u.full_name) AS company_name
                    FROM job_applications ja
                    JOIN job_postings jp ON jp.id=ja.job_posting_id
@@ -99,6 +100,43 @@ class MarketplaceRepository:
                    WHERE ja.candidate_id=? ORDER BY ja.applied_at DESC,ja.id DESC""",
                 (candidate_id,),
             ))
+
+    def respond_to_offer(
+        self, candidate_id: int, application_id: int, accepted: bool
+    ) -> dict[str, object] | None:
+        """Allow only the matching Candidate to answer an outstanding offer once."""
+        if type(application_id) is not int or application_id <= 0 or type(accepted) is not bool:
+            return None
+        response = "accepted" if accepted else "declined"
+        with _LOCK:
+            if not self._role(candidate_id, "candidate"):
+                return None
+            # An atomic conditional UPDATE prevents double answers and wrong-owner access.
+            updated = self.conn.execute(
+                """UPDATE application_interviews
+                   SET offer_response=?,
+                       offer_responded_at=datetime('now','localtime')
+                   WHERE application_id=? AND decision='offered'
+                     AND offer_response IS NULL
+                     AND EXISTS (
+                         SELECT 1 FROM job_applications ja
+                         WHERE ja.id=application_interviews.application_id
+                           AND ja.candidate_id=? AND ja.status='offered'
+                     )""",
+                (response, application_id, candidate_id),
+            )
+            if updated.rowcount != 1:
+                return None
+            row = self.conn.execute(
+                """SELECT ai.application_id, ai.offer_response,
+                          ai.offer_responded_at, ja.status AS application_status
+                   FROM application_interviews ai
+                   JOIN job_applications ja ON ja.id=ai.application_id
+                   WHERE ai.application_id=? AND ja.candidate_id=?""",
+                (application_id, candidate_id),
+            ).fetchone()
+            self.conn.commit()
+            return dict(row) if row is not None else None
 
     def withdraw(self, candidate_id: int, application_id: int) -> bool:
         if type(application_id) is not int or application_id <= 0:
