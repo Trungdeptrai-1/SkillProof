@@ -160,8 +160,9 @@ class CompanyProfileScreen(QWidget):
 
     def _build_header(self) -> None:
         header = QFrame()
+        header.setObjectName("Section_header")
         header.setStyleSheet(f"""
-            QFrame {{
+            QFrame#Section_header {{
                 background: {COLOR_WHITE}; border-radius: 12px;
                 border: 1px solid {COLOR_LIGHT_GRAY};
             }}
@@ -210,8 +211,9 @@ class CompanyProfileScreen(QWidget):
     def _build_form_card(self) -> None:
         """Card chứa form tạo/sửa hồ sơ."""
         self._card = QFrame()
+        self._card.setObjectName("Section_self__card")
         self._card.setStyleSheet(f"""
-            QFrame {{
+            QFrame#Section_self__card {{
                 background: {COLOR_WHITE}; border-radius: 12px;
                 border: 1px solid {COLOR_LIGHT_GRAY};
             }}
