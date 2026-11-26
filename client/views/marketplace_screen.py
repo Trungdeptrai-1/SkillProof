@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
 from server.controllers.marketplace_controller import MarketplaceController
 from server.controllers.direct_invitation_controller import DirectInvitationController
 from client.components.talent_feed import candidate_card, candidate_avatar, experience_label
+from client.components.candidate_marketplace_cards import list_card, status_label
 
 
 STYLE = """
@@ -62,6 +63,21 @@ QWidget#TalentProfileHeader { background: transparent; border: none; }
 QLabel#TalentDetailName { font-size: 22px; font-weight: 700; color: #122B49; }
 QLabel#TalentDetailHeadline { font-size: 14px; color: #2E68A8; font-weight: 600; }
 QLabel#TalentDetailMeta { font-size: 12px; color: #66778F; }
+QListWidget#CandidateFeed { background: transparent; border: none; outline: none; }
+QListWidget#CandidateFeed::item { background: #FFFFFF; border: 1px solid #DEE7F1; border-radius: 12px; margin-bottom: 9px; }
+QListWidget#CandidateFeed::item:selected { background: #EAF4FF; border: 2px solid #3185D9; }
+QListWidget#CandidateFeed::item:hover { border: 1px solid #91B6E8; }
+QFrame#CandidateListCard { background: transparent; border: none; }
+QLabel#CandidateCardMarker { background: #E9F1FC; border-radius: 11px; color: #2A67A8; font-size: 21px; }
+QLabel#CandidateCardTitle { font-size: 15px; font-weight: 700; color: #152E4C; }
+QLabel#CandidateCardCompany { color: #41658E; font-size: 13px; }
+QLabel#CandidateCardMeta { color: #73859B; font-size: 11px; }
+QLabel#CandidateCardStatus { background: #EAF3FF; color: #215F9D; border: 1px solid #CFE1F6;
+    border-radius: 9px; padding: 8px; font-size: 11px; font-weight: 600; }
+QFrame#CandidateSidePanel { background: white; border: 1px solid #DFE7F1; border-radius: 13px; }
+QLabel#CandidateDetailHeading { color: #152E4C; font-size: 19px; font-weight: 700; }
+QLabel#CandidateDetailBody { color: #526B85; font-size: 13px; }
+QFrame#PrivacyPanel { background: #FFFFFF; border: 1px solid #DFE7F1; border-radius: 14px; }
 QLabel#TalentEmpty { color: #5E738E; font-size: 13px; background: transparent; }
 """
 
@@ -251,53 +267,277 @@ class MarketplaceScreen(QWidget):
         layout.addLayout(columns, 1)
         self.tabs.addTab(explore, "Khám phá việc làm")
 
+        # Candidate journey tabs: feed-based navigation + contextual action panels.
         mine = QWidget()
         mine_layout = QVBoxLayout(mine)
-        mine_layout.addWidget(button("Làm mới đơn ứng tuyển", self._load_applications))
-        self.apps_table = table(["ID", "Vị trí", "Công ty", "Trạng thái", "Ngày ứng tuyển", "Phản hồi tuyển dụng", "Trả lời đề nghị"])
-        mine_layout.addWidget(self.apps_table)
-        offer_actions = QHBoxLayout()
-        offer_actions.addWidget(button("Rút đơn đã chọn", self._withdraw_selected))
-        offer_actions.addStretch()
-        offer_actions.addWidget(button("Chấp nhận đề nghị", lambda: self._respond_selected_offer(True), True))
-        offer_actions.addWidget(button("Từ chối đề nghị", lambda: self._respond_selected_offer(False)))
-        mine_layout.addLayout(offer_actions)
+        mine_layout.setSpacing(15)
+        mine_layout.addWidget(self._candidate_section_heading(
+            "Đơn ứng tuyển của tôi",
+            "Theo dõi tiến độ xét duyệt hồ sơ, phản hồi đề nghị tuyển dụng và quản lý đơn."
+        ))
+        mine_layout.addWidget(button("Làm mới đơn ứng tuyển", self._load_applications),
+                              alignment=Qt.AlignmentFlag.AlignRight)
+        self.apps_table = table(["ID", "Vị trí", "Công ty", "Trạng thái",
+                                 "Ngày ứng tuyển", "Phản hồi tuyển dụng", "Trả lời đề nghị"])
+        self.apps_feed, apps_panel, apps_detail, self.apps_heading, self.apps_summary = self._candidate_feed_sections(
+            "Chọn một đơn ứng tuyển", "Trạng thái, phản hồi và các thao tác sẽ hiển thị ở đây."
+        )
+        self.apps_table.itemSelectionChanged.connect(
+            lambda: self._candidate_model_selected("applications")
+        )
+        apps_actions = QVBoxLayout()
+        self.withdraw_button = button("Rút đơn ứng tuyển", self._withdraw_selected)
+        self.accept_offer_button = button(
+            "Chấp nhận đề nghị", lambda: self._respond_selected_offer(True), True
+        )
+        self.decline_offer_button = button(
+            "Từ chối đề nghị", lambda: self._respond_selected_offer(False)
+        )
+        apps_actions.addWidget(self.withdraw_button)
+        apps_actions.addWidget(self.accept_offer_button)
+        apps_actions.addWidget(self.decline_offer_button)
+        apps_detail.addLayout(apps_actions)
+        apps_detail.addStretch()
+        self._candidate_feed_layout(mine_layout, self.apps_feed, apps_panel)
         self.tabs.addTab(mine, "Đơn ứng tuyển của tôi")
 
         saved = QWidget()
         saved_layout = QVBoxLayout(saved)
-        saved_layout.addWidget(button("Làm mới việc làm đã lưu", self._load_saved_jobs))
+        saved_layout.setSpacing(15)
+        saved_layout.addWidget(self._candidate_section_heading(
+            "Việc làm đã lưu",
+            "Danh sách công việc bạn quan tâm. Bạn có thể quay lại xem và quản lý việc đã lưu."
+        ))
+        saved_layout.addWidget(button("Làm mới việc đã lưu", self._load_saved_jobs),
+                               alignment=Qt.AlignmentFlag.AlignRight)
         self.saved_table = table(["ID", "Vị trí", "Công ty", "Địa điểm", "Trạng thái", "Đã ứng tuyển"])
-        saved_layout.addWidget(self.saved_table, 1)
-        saved_layout.addWidget(button("Bỏ lưu việc làm đã chọn", self._unsave_saved_job))
+        self.saved_feed, saved_panel, saved_detail, self.saved_heading, self.saved_summary = self._candidate_feed_sections(
+            "Chọn công việc đã lưu", "Xem tình trạng tin tuyển dụng và bỏ lưu khi không còn quan tâm."
+        )
+        self.saved_table.itemSelectionChanged.connect(
+            lambda: self._candidate_model_selected("saved")
+        )
+        self.unsave_button = button("Bỏ lưu công việc", self._unsave_saved_job)
+        saved_detail.addWidget(self.unsave_button)
+        saved_detail.addStretch()
+        self._candidate_feed_layout(saved_layout, self.saved_feed, saved_panel)
         self.tabs.addTab(saved, "Việc làm đã lưu")
 
         privacy = QWidget()
         privacy_layout = QVBoxLayout(privacy)
+        privacy_layout.setSpacing(18)
+        privacy_layout.addWidget(self._candidate_section_heading(
+            "Quyền riêng tư hồ sơ",
+            "Bạn kiểm soát việc doanh nghiệp có thể tìm thấy hồ sơ giới thiệu của mình hay không."
+        ))
+        privacy_box = QFrame()
+        privacy_box.setObjectName("PrivacyPanel")
+        privacy_inner = QVBoxLayout(privacy_box)
+        privacy_inner.setContentsMargins(25, 25, 25, 25)
+        privacy_inner.setSpacing(16)
+        privacy_title = QLabel("Hiển thị hồ sơ với nhà tuyển dụng")
+        privacy_title.setObjectName("CandidateDetailHeading")
+        privacy_inner.addWidget(privacy_title)
+        self.privacy_status = QLabel("Đang kiểm tra cài đặt công khai hồ sơ...")
+        self.privacy_status.setObjectName("CandidateDetailBody")
+        privacy_inner.addWidget(self.privacy_status)
         note = QLabel(
-            "Mặc định hồ sơ của bạn không xuất hiện trong kết quả tìm kiếm ứng viên. "
-            "Chỉ bật nếu bạn muốn doanh nghiệp xem thông tin giới thiệu công khai. "
-            "Email và đường dẫn CV không được hiển thị trong danh sách tìm kiếm."
+            "Mặc định hồ sơ của bạn không hiển thị trong kết quả tìm kiếm ứng viên. "
+            "Khi bật công khai, doanh nghiệp chỉ thấy tên, vị trí chuyên môn, "
+            "số năm kinh nghiệm và phần giới thiệu. Email cùng đường dẫn CV vẫn được giữ riêng tư."
         )
         note.setWordWrap(True)
-        privacy_layout.addWidget(note)
+        note.setObjectName("CandidateDetailBody")
+        privacy_inner.addWidget(note)
         self.visibility = QCheckBox("Cho phép doanh nghiệp tìm thấy hồ sơ giới thiệu của tôi")
-        privacy_layout.addWidget(self.visibility)
-        privacy_layout.addWidget(button("Lưu cài đặt hiển thị", self._set_visibility, True))
+        self.visibility.toggled.connect(self._update_privacy_preview)
+        privacy_inner.addWidget(self.visibility)
+        privacy_inner.addWidget(button("Lưu quyền hiển thị", self._set_visibility, True),
+                                alignment=Qt.AlignmentFlag.AlignLeft)
+        privacy_layout.addWidget(privacy_box)
         privacy_layout.addStretch()
         self.tabs.addTab(privacy, "Quyền riêng tư")
 
         invites = QWidget()
         invites_layout = QVBoxLayout(invites)
-        invites_layout.addWidget(button("Làm mới lời mời", self._load_received_invites))
+        invites_layout.setSpacing(15)
+        invites_layout.addWidget(self._candidate_section_heading(
+            "Lời mời tuyển dụng",
+            "Xem doanh nghiệp đã kết nối với bạn và trả lời các lời mời phù hợp."
+        ))
+        invites_layout.addWidget(button("Làm mới lời mời", self._load_received_invites),
+                                 alignment=Qt.AlignmentFlag.AlignRight)
         self.received_table = table(["ID", "Vị trí", "Công ty", "Lời nhắn", "Trạng thái", "Ngày gửi"])
-        invites_layout.addWidget(self.received_table, 1)
-        answer_buttons = QHBoxLayout()
-        answer_buttons.addWidget(button("Chấp nhận lời mời", lambda: self._answer_invite(True), True))
-        answer_buttons.addWidget(button("Từ chối lời mời", lambda: self._answer_invite(False)))
-        answer_buttons.addStretch()
-        invites_layout.addLayout(answer_buttons)
+        self.invites_feed, invites_panel, invites_detail, self.invites_heading, self.invites_summary = self._candidate_feed_sections(
+            "Chọn một lời mời", "Đọc nội dung lời mời từ doanh nghiệp trước khi quyết định."
+        )
+        self.received_table.itemSelectionChanged.connect(
+            lambda: self._candidate_model_selected("invites")
+        )
+        self.invite_accept_button = button(
+            "Chấp nhận lời mời", lambda: self._answer_invite(True), True
+        )
+        self.invite_decline_button = button(
+            "Từ chối lời mời", lambda: self._answer_invite(False)
+        )
+        invites_detail.addWidget(self.invite_accept_button)
+        invites_detail.addWidget(self.invite_decline_button)
+        invites_detail.addStretch()
+        self._candidate_feed_layout(invites_layout, self.invites_feed, invites_panel)
         self.tabs.addTab(invites, "Lời mời tuyển dụng")
+
+        self._candidate_data = {"applications": [], "saved": [], "invites": []}
+        for kind, feed in (
+            ("applications", self.apps_feed),
+            ("saved", self.saved_feed),
+            ("invites", self.invites_feed),
+        ):
+            feed.itemSelectionChanged.connect(
+                lambda selected_kind=kind: self._candidate_feed_selected(selected_kind)
+            )
+        self._refresh_candidate_action_states()
+
+    def _candidate_section_heading(self, heading: str, description: str) -> QWidget:
+        wrap = QWidget()
+        layout = QVBoxLayout(wrap)
+        layout.setContentsMargins(0, 8, 0, 6)
+        layout.setSpacing(5)
+        title = QLabel(heading)
+        title.setObjectName("PageTitle")
+        layout.addWidget(title)
+        subtitle = QLabel(description)
+        subtitle.setObjectName("CandidateDetailBody")
+        subtitle.setWordWrap(True)
+        layout.addWidget(subtitle)
+        return wrap
+
+    def _candidate_feed_sections(
+        self, heading: str, description: str
+    ) -> tuple[QListWidget, QFrame, QVBoxLayout, QLabel, QLabel]:
+        feed = QListWidget()
+        feed.setObjectName("CandidateFeed")
+        feed.setSpacing(4)
+        feed.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        panel = QFrame()
+        panel.setObjectName("CandidateSidePanel")
+        panel.setMinimumWidth(290)
+        panel.setMaximumWidth(520)
+        side = QVBoxLayout(panel)
+        side.setContentsMargins(23, 22, 23, 22)
+        side.setSpacing(14)
+        title = QLabel(heading)
+        title.setObjectName("CandidateDetailHeading")
+        title.setWordWrap(True)
+        summary = QLabel(description)
+        summary.setObjectName("CandidateDetailBody")
+        summary.setWordWrap(True)
+        side.addWidget(title)
+        side.addWidget(summary)
+        return feed, panel, side, title, summary
+
+    def _candidate_feed_layout(self, parent: QVBoxLayout,
+                               feed: QListWidget, panel: QFrame) -> None:
+        row = QHBoxLayout()
+        row.setSpacing(18)
+        row.addWidget(feed, 5)
+        row.addWidget(panel, 4)
+        parent.addLayout(row, 1)
+
+    def _candidate_model_selected(self, kind: str) -> None:
+        table_widget, feed, *_ = self._candidate_views(kind)
+        row = table_widget.currentRow()
+        if 0 <= row < len(self._candidate_data.get(kind, [])) and feed.currentRow() != row:
+            feed.setCurrentRow(row)
+
+    def _candidate_feed_selected(self, kind: str) -> None:
+        model, feed, title, summary = self._candidate_views(kind)
+        row = feed.currentRow()
+        data = self._candidate_data.get(kind, [])
+        selected = data[row] if 0 <= row < len(data) else None
+        if selected is not None:
+            model.blockSignals(True)
+            model.selectRow(row)
+            model.blockSignals(False)
+        title.setText(
+            str((selected.get("title") or selected.get("job_title") or "Vị trí tuyển dụng"))
+            if selected else "Chưa chọn mục nào"
+        )
+        if selected is None:
+            summary.setText("Chọn một thẻ bên trái để xem thông tin và thao tác phù hợp.")
+        elif kind == "applications":
+            summary.setText(
+                f"Doanh nghiệp: {selected.get('company_name') or 'Chưa cập nhật'}\n"
+                f"Trạng thái: {status_label(selected.get('status'))}\n"
+                f"Phản hồi: {selected.get('decision_note') or 'Chưa có phản hồi'}\n"
+                f"Đề nghị: {status_label(selected.get('offer_response'))}"
+            )
+        elif kind == "saved":
+            summary.setText(
+                f"Doanh nghiệp: {selected.get('company_name') or 'Chưa cập nhật'}\n"
+                f"Địa điểm: {selected.get('location') or 'Chưa cập nhật'}\n"
+                f"Tình trạng: {status_label(selected.get('status'))}"
+            )
+        else:
+            summary.setText(
+                f"Doanh nghiệp: {selected.get('company_name') or 'Chưa cập nhật'}\n"
+                f"Trạng thái: {status_label(selected.get('status'))}\n"
+                f"Lời nhắn: {selected.get('message') or 'Không có lời nhắn'}"
+            )
+        self._refresh_candidate_action_states()
+
+    def _candidate_views(self, kind: str):
+        return {
+            "applications": (self.apps_table, self.apps_feed, self.apps_heading, self.apps_summary),
+            "saved": (self.saved_table, self.saved_feed, self.saved_heading, self.saved_summary),
+            "invites": (self.received_table, self.invites_feed, self.invites_heading, self.invites_summary),
+        }[kind]
+
+    def _fill_candidate_feed(self, kind: str, rows: list[dict]) -> None:
+        model, feed, *_ = self._candidate_views(kind)
+        self._candidate_data[kind] = rows
+        feed.blockSignals(True)
+        feed.clear()
+        for row in rows:
+            item = QListWidgetItem()
+            item.setSizeHint(QSize(300, 132))
+            feed.addItem(item)
+            feed.setItemWidget(item, list_card(row, kind))
+        feed.blockSignals(False)
+        if rows:
+            feed.setCurrentRow(0)
+        else:
+            item = QListWidgetItem("Chưa có dữ liệu trong mục này. Các hoạt động mới sẽ xuất hiện ở đây.")
+            item.setFlags(Qt.ItemFlag.NoItemFlags)
+            item.setSizeHint(QSize(300, 100))
+            feed.addItem(item)
+            model.clearSelection()
+            self._candidate_feed_selected(kind)
+
+    def _refresh_candidate_action_states(self) -> None:
+        if not hasattr(self, "_candidate_data"):
+            return
+        selected = {}
+        for kind in self._candidate_data:
+            _, feed, *_ = self._candidate_views(kind)
+            row = feed.currentRow()
+            selected[kind] = self._candidate_data[kind][row] if 0 <= row < len(self._candidate_data[kind]) else None
+        app = selected["applications"]
+        offer_pending = bool(app and app.get("status") == "offered" and not app.get("offer_response"))
+        self.accept_offer_button.setEnabled(offer_pending)
+        self.decline_offer_button.setEnabled(offer_pending)
+        self.withdraw_button.setEnabled(bool(app and app.get("status") in ("submitted", "reviewing", "shortlisted")))
+        self.unsave_button.setEnabled(selected["saved"] is not None)
+        invitation = selected["invites"]
+        pending = bool(invitation and invitation.get("status") == "pending")
+        self.invite_accept_button.setEnabled(pending)
+        self.invite_decline_button.setEnabled(pending)
+
+    def _update_privacy_preview(self, checked: bool) -> None:
+        if hasattr(self, "privacy_status"):
+            self.privacy_status.setText(
+                "Hồ sơ sẽ được công khai sau khi bạn nhấn Lưu quyền hiển thị."
+                if checked else "Hồ sơ sẽ được ẩn sau khi bạn nhấn Lưu quyền hiển thị."
+            )
 
     def _company_tabs(self) -> None:
         applicants = QWidget()
@@ -559,6 +799,10 @@ class MarketplaceScreen(QWidget):
             privacy = self.controller.get_discoverable()
             if privacy.success:
                 self.visibility.setChecked(bool(privacy.data))
+                self.privacy_status.setText(
+                    "Hồ sơ đang công khai trong kết quả tìm kiếm của doanh nghiệp."
+                    if bool(privacy.data) else "Hồ sơ hiện không được công khai trong tìm kiếm."
+                )
         else:
             self._load_positions()
             self._load_assessment_exams()
@@ -650,10 +894,10 @@ class MarketplaceScreen(QWidget):
     def _load_saved_jobs(self) -> None:
         result = self.controller.saved_jobs()
         if self._result(result):
-            populate(
-                self.saved_table, list(result.data),
-                ["id", "title", "company_name", "location", "status", "applied"],
-            )
+            rows = list(result.data)
+            populate(self.saved_table, rows,
+                     ["id", "title", "company_name", "location", "status", "applied"])
+            self._fill_candidate_feed("saved", rows)
 
     def _unsave_saved_job(self) -> None:
         job_id = selected_id(self.saved_table)
@@ -667,7 +911,10 @@ class MarketplaceScreen(QWidget):
     def _load_applications(self) -> None:
         result = self.controller.my_applications()
         if self._result(result):
-            populate(self.apps_table, list(result.data), ["id", "title", "company_name", "status", "applied_at", "decision_note", "offer_response"])
+            rows = list(result.data)
+            populate(self.apps_table, rows,
+                     ["id", "title", "company_name", "status", "applied_at", "decision_note", "offer_response"])
+            self._fill_candidate_feed("applications", rows)
 
     def _respond_selected_offer(self, accepted: bool) -> None:
         application_id = selected_id(self.apps_table)
@@ -911,8 +1158,10 @@ class MarketplaceScreen(QWidget):
     def _load_received_invites(self) -> None:
         result = self.invitation_controller.received()
         if self._result(result):
-            populate(self.received_table, list(result.data),
+            rows = list(result.data)
+            populate(self.received_table, rows,
                      ["id", "job_title", "company_name", "message", "status", "sent_at"])
+            self._fill_candidate_feed("invites", rows)
 
     def _answer_invite(self, accepted: bool) -> None:
         invite_id = selected_id(self.received_table)
