@@ -624,13 +624,13 @@ class _ContentArea(QWidget):
         layout.setContentsMargins(34, 30, 34, 32)
         layout.setSpacing(18)
 
-        eyebrow = QLabel("KHÔNG GIAN DOANH NGHIỆP")
+        eyebrow = QLabel(f"XIN CHÀO, {self._user.display_name.upper()}")
         eyebrow.setStyleSheet(
             "QLabel { color: #3569A2; background: transparent; font-size: 11px;"
             " font-weight: 700; }"
         )
         layout.addWidget(eyebrow)
-        title = QLabel(f"Xin chào, {self._user.display_name}")
+        title = QLabel(ROLE_CONFIG[self._user.role]["title"])
         title.setWordWrap(True)
         title.setStyleSheet(
             "QLabel { color: #142B45; background: transparent;"
