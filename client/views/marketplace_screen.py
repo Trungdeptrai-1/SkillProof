@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
 )
 from server.controllers.marketplace_controller import MarketplaceController
 from server.controllers.direct_invitation_controller import DirectInvitationController
+from client.components.talent_feed import candidate_card, candidate_avatar, experience_label
 
 
 STYLE = """
@@ -45,6 +46,21 @@ QListWidget#JobCards::item:selected { background: #EAF3FF; color: #102D4D;
     border: 2px solid #3284D7; }
 QFrame#JobDetailPanel { background: white; border: 1px solid #DCE5F1; border-radius: 14px; }
 QLabel#JobDetailTitle { font-size: 17px; font-weight: 700; color: #102C4D; }
+QListWidget#TalentFeed { background: transparent; border: none; outline: none; }
+QListWidget#TalentFeed::item { background: #FFFFFF; border: 1px solid #DEE7F2;
+    border-radius: 14px; margin-bottom: 10px; }
+QListWidget#TalentFeed::item:hover { border: 1px solid #7EAAE5; background: #F8FBFF; }
+QListWidget#TalentFeed::item:selected { background: #EAF4FF; border: 2px solid #3185D9; }
+QFrame#TalentCard { background: transparent; border: none; }
+QLabel#TalentCardName { font-size: 16px; font-weight: 700; color: #122B49; }
+QLabel#TalentCardHeadline { font-size: 13px; font-weight: 600; color: #2E68A8; }
+QLabel#TalentCardMeta { font-size: 12px; color: #4C647D; }
+QLabel#TalentCardBio { font-size: 12px; color: #677A91; }
+QFrame#TalentDetailPanel { background: #FFFFFF; border: 1px solid #DEE7F2; border-radius: 14px; }
+QLabel#TalentDetailName { font-size: 22px; font-weight: 700; color: #122B49; }
+QLabel#TalentDetailHeadline { font-size: 14px; color: #2E68A8; font-weight: 600; }
+QLabel#TalentDetailMeta { font-size: 12px; color: #66778F; }
+QLabel#TalentEmpty { color: #5E738E; font-size: 13px; background: transparent; }
 """
 
 
@@ -127,6 +143,7 @@ class MarketplaceScreen(QWidget):
         self.on_back = None
         self._jobs: list[dict] = []
         self._positions: list[dict] = []
+        self._talents: list[dict] = []
         self._setup()
         self.refresh()
 
@@ -379,27 +396,108 @@ class MarketplaceScreen(QWidget):
 
         talents = QWidget()
         talent_layout = QVBoxLayout(talents)
+        talent_layout.setContentsMargins(0, 10, 0, 0)
+        talent_layout.setSpacing(16)
+
+        # Search is an ordinary controller query; no fake recommendation scores.
+        discovery_intro = QLabel("Tìm ứng viên phù hợp với đội ngũ của bạn")
+        discovery_intro.setObjectName("PageTitle")
+        talent_layout.addWidget(discovery_intro)
+        discovery_note = QLabel(
+            "Khám phá hồ sơ nghề nghiệp đã được ứng viên tự nguyện công khai. "
+            "Chọn một hồ sơ để xem thêm và gửi lời mời tuyển dụng."
+        )
+        discovery_note.setWordWrap(True)
+        discovery_note.setObjectName("Status")
+        talent_layout.addWidget(discovery_note)
+
         search_bar = QHBoxLayout()
+        search_bar.setSpacing(10)
         self.talent_search = QLineEdit()
-        self.talent_search.setPlaceholderText("Tìm theo tên hoặc chuyên môn")
+        self.talent_search.setPlaceholderText("Tìm theo tên hoặc vị trí chuyên môn (Python, QA, Data...)")
+        self.talent_search.setMaxLength(200)
+        self.talent_search.returnPressed.connect(self._load_talents)
         search_bar.addWidget(self.talent_search, 1)
         search_bar.addWidget(button("Tìm ứng viên", self._load_talents, True))
         talent_layout.addLayout(search_bar)
+
+        self.talent_count = QLabel("")
+        self.talent_count.setObjectName("SectionTitle")
+        talent_layout.addWidget(self.talent_count)
+
+        # Hidden compatibility/selection model: existing controller workflows use
+        # selected_id(self.talent_table). The new feed is the visible interaction.
         self.talent_table = table(["ID", "Ứng viên", "Chuyên môn", "Kinh nghiệm (năm)"])
-        talent_layout.addWidget(self.talent_table)
-        msg = QLabel("Chỉ hiển thị hồ sơ đã được ứng viên cho phép công khai.")
-        msg.setObjectName("Status")
-        talent_layout.addWidget(msg)
-        self.talent_message = QLineEdit()
-        self.talent_message.setMaxLength(2000)
-        self.talent_message.setPlaceholderText("Lời nhắn gửi ứng viên (không bắt buộc)")
-        talent_layout.addWidget(self.talent_message)
-        talent_actions = QHBoxLayout()
-        talent_actions.addWidget(QLabel("Mời cho vị trí:"))
+        self.talent_table.itemSelectionChanged.connect(self._talent_table_selected)
+
+        columns = QHBoxLayout()
+        columns.setSpacing(18)
+        listing = QVBoxLayout()
+        listing.setContentsMargins(0, 0, 0, 0)
+        self.talent_feed = QListWidget()
+        self.talent_feed.setObjectName("TalentFeed")
+        self.talent_feed.setSpacing(4)
+        self.talent_feed.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.talent_feed.itemSelectionChanged.connect(self._talent_card_selected)
+        listing.addWidget(self.talent_feed, 1)
+        columns.addLayout(listing, 5)
+
+        panel = QFrame()
+        panel.setObjectName("TalentDetailPanel")
+        panel_layout = QVBoxLayout(panel)
+        panel_layout.setContentsMargins(24, 24, 24, 24)
+        panel_layout.setSpacing(11)
+        self.talent_avatar = QLabel()
+        self.talent_avatar.setFixedSize(80, 80)
+        self.talent_avatar.setPixmap(candidate_avatar("Ứng viên", 80))
+        panel_layout.addWidget(self.talent_avatar)
+        self.talent_name = QLabel("Chọn hồ sơ ứng viên")
+        self.talent_name.setObjectName("TalentDetailName")
+        self.talent_name.setWordWrap(True)
+        panel_layout.addWidget(self.talent_name)
+        self.talent_headline = QLabel("Thông tin nghề nghiệp được công khai sẽ xuất hiện tại đây.")
+        self.talent_headline.setObjectName("TalentDetailHeadline")
+        self.talent_headline.setWordWrap(True)
+        panel_layout.addWidget(self.talent_headline)
+        self.talent_experience = QLabel("")
+        self.talent_experience.setObjectName("TalentDetailMeta")
+        panel_layout.addWidget(self.talent_experience)
+
+        about_title = QLabel("Giới thiệu bản thân")
+        about_title.setObjectName("SectionTitle")
+        panel_layout.addWidget(about_title)
+        self.talent_bio = QLabel("Chọn một ứng viên ở danh sách bên trái để xem giới thiệu.")
+        self.talent_bio.setWordWrap(True)
+        self.talent_bio.setAlignment(Qt.AlignmentFlag.AlignTop)
+        self.talent_bio.setObjectName("TalentCardMeta")
+        panel_layout.addWidget(self.talent_bio)
+        panel_layout.addSpacing(8)
+
+        invite_heading = QLabel("Mời ứng viên ứng tuyển")
+        invite_heading.setObjectName("SectionTitle")
+        panel_layout.addWidget(invite_heading)
+        panel_layout.addWidget(QLabel("Vị trí tuyển dụng"))
         self.invite_position = QComboBox()
-        talent_actions.addWidget(self.invite_position, 1)
-        talent_actions.addWidget(button("Gửi lời mời tuyển dụng", self._invite_selected_candidate, True))
-        talent_layout.addLayout(talent_actions)
+        panel_layout.addWidget(self.invite_position)
+        self.talent_message = QTextEdit()
+        self.talent_message.setMaximumHeight(100)
+        self.talent_message.setPlaceholderText("Lời mời giới thiệu vị trí và lý do bạn muốn kết nối (không bắt buộc)")
+        self.talent_message.textChanged.connect(self._limit_talent_message)
+        panel_layout.addWidget(self.talent_message)
+        self.talent_invite_button = button(
+            "Gửi lời mời tuyển dụng", self._invite_selected_candidate, True
+        )
+        panel_layout.addWidget(self.talent_invite_button)
+        self.talent_privacy = QLabel(
+            "Thông tin liên hệ và đường dẫn CV riêng tư không hiển thị trong tìm kiếm."
+        )
+        self.talent_privacy.setObjectName("TalentDetailMeta")
+        self.talent_privacy.setWordWrap(True)
+        panel_layout.addWidget(self.talent_privacy)
+        panel_layout.addStretch()
+        columns.addWidget(panel, 4)
+        talent_layout.addLayout(columns, 1)
+        self._refresh_talent_detail(None)
         self.tabs.addTab(talents, "Khám phá nhân tài")
 
         sent = QWidget()
@@ -693,11 +791,84 @@ class MarketplaceScreen(QWidget):
             self.hiring_note.clear()
             self._load_applicants()
 
+    def _limit_talent_message(self) -> None:
+        # QTextEdit has no maxLength property; enforce the service's 2000 limit.
+        text = self.talent_message.toPlainText()
+        if len(text) > 2000:
+            cursor = self.talent_message.textCursor()
+            position = min(cursor.position(), 2000)
+            self.talent_message.blockSignals(True)
+            self.talent_message.setPlainText(text[:2000])
+            cursor.setPosition(position)
+            self.talent_message.setTextCursor(cursor)
+            self.talent_message.blockSignals(False)
+
+    def _talent_card_selected(self) -> None:
+        row = self.talent_feed.currentRow()
+        if 0 <= row < self.talent_table.rowCount():
+            self.talent_table.blockSignals(True)
+            self.talent_table.selectRow(row)
+            self.talent_table.blockSignals(False)
+            self._refresh_talent_detail(self._talents[row])
+
+    def _talent_table_selected(self) -> None:
+        row = self.talent_table.currentRow()
+        if 0 <= row < self.talent_feed.count() and row != self.talent_feed.currentRow():
+            self.talent_feed.setCurrentRow(row)
+
+    def _refresh_talent_detail(self, candidate: dict | None) -> None:
+        selected = candidate is not None
+        name = str(candidate.get("full_name") or "Ứng viên") if selected else "Chọn hồ sơ ứng viên"
+        self.talent_name.setText(name)
+        self.talent_avatar.setPixmap(candidate_avatar(name, 80))
+        self.talent_headline.setText(
+            str(candidate.get("headline") or "Chưa cập nhật chuyên môn")
+            if selected else "Chọn một thẻ hồ sơ để xem thông tin chuyên môn."
+        )
+        self.talent_experience.setText(
+            experience_label(candidate.get("years_experience")) if selected else ""
+        )
+        self.talent_bio.setText(
+            str(candidate.get("bio") or "Ứng viên chưa thêm phần giới thiệu.")
+            if selected else "Giới thiệu sẽ xuất hiện sau khi bạn chọn ứng viên."
+        )
+        self.talent_invite_button.setEnabled(selected and self.invite_position.currentData() is not None)
+
     def _load_talents(self) -> None:
         result = self.controller.discover_candidates(self.talent_search.text())
-        if self._result(result):
-            populate(self.talent_table, list(result.data),
-                     ["id", "full_name", "headline", "years_experience"])
+        if not self._result(result):
+            self._talents = []
+            self.talent_table.setRowCount(0)
+            self.talent_feed.clear()
+            self.talent_count.setText("Không thể tải hồ sơ. Vui lòng thử lại.")
+            self._refresh_talent_detail(None)
+            return
+        self._talents = list(result.data or [])
+        self.talent_table.blockSignals(True)
+        populate(self.talent_table, self._talents,
+                 ["id", "full_name", "headline", "years_experience"])
+        self.talent_table.blockSignals(False)
+        self.talent_feed.blockSignals(True)
+        self.talent_feed.clear()
+        for candidate in self._talents:
+            item = QListWidgetItem()
+            item.setSizeHint(QSize(300, 145))
+            self.talent_feed.addItem(item)
+            self.talent_feed.setItemWidget(item, candidate_card(candidate))
+        self.talent_feed.blockSignals(False)
+        count = len(self._talents)
+        self.talent_count.setText(f"{count} hồ sơ ứng viên công khai")
+        if count:
+            self.talent_feed.setCurrentRow(0)
+            self._talent_card_selected()
+        else:
+            empty = QListWidgetItem(
+                "Chưa tìm thấy hồ sơ phù hợp. Thử từ khóa khác hoặc tìm kiếm tất cả."
+            )
+            empty.setFlags(Qt.ItemFlag.NoItemFlags)
+            empty.setSizeHint(QSize(250, 100))
+            self.talent_feed.addItem(empty)
+            self._refresh_talent_detail(None)
 
     def _load_received_invites(self) -> None:
         result = self.invitation_controller.received()
@@ -734,7 +905,7 @@ class MarketplaceScreen(QWidget):
         if QMessageBox.question(self, "Xác nhận", "Gửi lời mời tuyển dụng tới ứng viên này?") != QMessageBox.StandardButton.Yes:
             return
         result = self.invitation_controller.send(
-            int(job_id), int(candidate_id), self.talent_message.text(),
+            int(job_id), int(candidate_id), self.talent_message.toPlainText(),
         )
         if self._result(result, "Đã gửi lời mời tuyển dụng."):
             self.talent_message.clear()
