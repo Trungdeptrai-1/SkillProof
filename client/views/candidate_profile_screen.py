@@ -173,8 +173,9 @@ class CandidateProfileScreen(QWidget):
 
     def _build_header(self) -> None:
         header = QFrame()
+        header.setObjectName("Section_header")
         header.setStyleSheet(f"""
-            QFrame {{
+            QFrame#Section_header {{
                 background: {COLOR_WHITE}; border-radius: 12px;
                 border: 1px solid {COLOR_LIGHT_GRAY};
             }}
@@ -201,8 +202,9 @@ class CandidateProfileScreen(QWidget):
     def _build_progress_bar(self) -> None:
         """Thanh tiến độ hoàn thiện hồ sơ."""
         prog_frame = QFrame()
+        prog_frame.setObjectName("Section_prog_frame")
         prog_frame.setStyleSheet(f"""
-            QFrame {{
+            QFrame#Section_prog_frame {{
                 background: {COLOR_WHITE}; border-radius: 10px;
                 border: 1px solid {COLOR_LIGHT_GRAY};
             }}
@@ -251,8 +253,9 @@ class CandidateProfileScreen(QWidget):
     def _build_personal_info_card(self) -> None:
         """Card thông tin cá nhân (read-only: họ tên, email)."""
         card = QFrame()
+        card.setObjectName("Section_card")
         card.setStyleSheet(f"""
-            QFrame {{
+            QFrame#Section_card {{
                 background: {COLOR_WHITE}; border-radius: 12px;
                 border: 1px solid {COLOR_LIGHT_GRAY};
             }}
@@ -290,8 +293,9 @@ class CandidateProfileScreen(QWidget):
     def _build_profile_form_card(self) -> None:
         """Card form hồ sơ chuyên môn."""
         self._card = QFrame()
+        self._card.setObjectName("Section_self__card")
         self._card.setStyleSheet(f"""
-            QFrame {{
+            QFrame#Section_self__card {{
                 background: {COLOR_WHITE}; border-radius: 12px;
                 border: 1px solid {COLOR_LIGHT_GRAY};
             }}
@@ -381,8 +385,9 @@ class CandidateProfileScreen(QWidget):
     def _build_cv_card(self) -> None:
         """Card quản lý CV."""
         cv_card = QFrame()
+        cv_card.setObjectName("Section_cv_card")
         cv_card.setStyleSheet(f"""
-            QFrame {{
+            QFrame#Section_cv_card {{
                 background: {COLOR_WHITE}; border-radius: 12px;
                 border: 1px solid {COLOR_LIGHT_GRAY};
             }}
