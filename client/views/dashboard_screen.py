@@ -124,7 +124,7 @@ class _Sidebar(QWidget):
 
     def __init__(self, user: UserModel, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self.setFixedWidth(240)
+        self.setFixedWidth(252)
         self._user = user
         self._on_logout_cb = None
         self._on_open_candidate_profile_cb = None
@@ -158,7 +158,8 @@ class _Sidebar(QWidget):
         logo_row = QHBoxLayout()
         logo_box = QWidget()
         logo_box.setFixedSize(36, 36)
-        logo_box.setStyleSheet(f"background:{COLOR_ACCENT}; border-radius:10px;")
+        logo_box.setObjectName("BrandIcon")
+        logo_box.setStyleSheet(f"QWidget#BrandIcon {{ background:{COLOR_ACCENT}; border-radius:10px; }}")
         ll = QVBoxLayout(logo_box)
         ll.setContentsMargins(0, 0, 0, 0)
         lbl = QLabel("✓")
@@ -187,7 +188,8 @@ class _Sidebar(QWidget):
         avatar_row = QHBoxLayout()
         av_box = QWidget()
         av_box.setFixedSize(44, 44)
-        av_box.setStyleSheet(f"background:{COLOR_NAVY_LIGHT}; border-radius:22px;")
+        av_box.setObjectName("SidebarAvatar")
+        av_box.setStyleSheet(f"QWidget#SidebarAvatar {{ background:{COLOR_NAVY_LIGHT}; border-radius:22px; }}")
         av_l = QVBoxLayout(av_box)
         av_l.setContentsMargins(0, 0, 0, 0)
         av_icon = QLabel(ROLE_ICONS.get(self._user.role, "👤"))
@@ -438,13 +440,14 @@ class _ContentArea(QWidget):
 
     def __init__(self, user: UserModel, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self.setStyleSheet(f"background-color: {COLOR_OFF_WHITE};")
+        self.setObjectName("DashboardContent")
+        self.setStyleSheet(f"QWidget#DashboardContent {{ background-color: {COLOR_OFF_WHITE}; }}")
         self._user = user
         self._setup_ui()
 
     def _setup_ui(self) -> None:
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(32, 28, 32, 28)
+        layout.setContentsMargins(36, 30, 36, 30)
         layout.setSpacing(0)
 
         cfg = ROLE_CONFIG.get(self._user.role, ROLE_CONFIG["candidate"])
@@ -452,10 +455,13 @@ class _ContentArea(QWidget):
 
         # ── Header ────────────────────────────────────────────────────────────
         header = QWidget()
+        header.setObjectName("DashboardHeader")
         header.setStyleSheet(f"""
-            background-color: {COLOR_WHITE};
-            border-radius: 12px;
-            border: 1px solid {COLOR_LIGHT_GRAY};
+            QWidget#DashboardHeader {{
+                background-color: {COLOR_WHITE};
+                border-radius: 14px;
+                border: 1px solid {COLOR_LIGHT_GRAY};
+            }}
         """)
         hl = QHBoxLayout(header)
         hl.setContentsMargins(24, 20, 24, 20)
@@ -499,7 +505,8 @@ class _ContentArea(QWidget):
 
         # Grid 2x2
         grid_widget = QWidget()
-        grid_widget.setStyleSheet("background: transparent;")
+        grid_widget.setObjectName("DashboardFeatureGrid")
+        grid_widget.setStyleSheet("QWidget#DashboardFeatureGrid { background: transparent; }")
         from PySide6.QtWidgets import QGridLayout
         grid = QGridLayout(grid_widget)
         grid.setSpacing(16)
@@ -548,8 +555,9 @@ class _ContentArea(QWidget):
 
         # ── Placeholder notice ─────────────────────────────────────────────────
         notice = QFrame()
+        notice.setObjectName("DashboardNotice")
         notice.setStyleSheet(f"""
-            QFrame {{
+            QFrame#DashboardNotice {{
                 background-color: rgba(46,134,222,0.08);
                 border: 1.5px dashed {COLOR_ACCENT};
                 border-radius: 10px;
@@ -583,21 +591,23 @@ class _ContentArea(QWidget):
         available: bool = False,
     ) -> QFrame:
         card = QFrame()
+        card.setObjectName("DashboardFeatureCard")
         card.setStyleSheet(f"""
-            QFrame {{
+            QFrame#DashboardFeatureCard {{
                 background-color: {COLOR_WHITE};
                 border-radius: 12px;
                 border: 1px solid {COLOR_LIGHT_GRAY};
             }}
         """)
-        card.setFixedHeight(100)
+        card.setMinimumHeight(104)
         cl = QHBoxLayout(card)
         cl.setContentsMargins(20, 16, 20, 16)
         cl.setSpacing(16)
 
         icon_box = QWidget()
         icon_box.setFixedSize(44, 44)
-        icon_box.setStyleSheet(f"background: rgba(46,134,222,0.1); border-radius: 12px;")
+        icon_box.setObjectName("FeatureIconBox")
+        icon_box.setStyleSheet("QWidget#FeatureIconBox { background: #EAF2FD; border-radius: 12px; }")
         ib_l = QVBoxLayout(icon_box)
         ib_l.setContentsMargins(0, 0, 0, 0)
         ic_lbl = QLabel(icon)
