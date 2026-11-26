@@ -59,7 +59,12 @@ class FakeMarketplaceController:
         ])
 
     def my_applications(self):
-        return self._answer("mine", data=[])
+        return self._answer("mine", data=[{"id": 12, "title": "Developer",
+            "company_name": "Company A", "status": "offered",
+            "decision_note": "Welcome", "offer_response": None}])
+
+    def respond_to_offer(self, application_id, accepted):
+        return self._answer("offer_reply", application_id, accepted, data=True)
 
     def saved_jobs(self):
         return self._answer("saved", data=[])
@@ -142,4 +147,24 @@ def test_dashboard_marketplace_route_candidate_and_company():
         dashboard._sidebar._handle_open_marketplace()
         assert calls == [role]
         dashboard.close()
+    app.processEvents()
+
+
+def test_candidate_offer_response_is_exposed_in_application_tab(monkeypatch):
+    app = qt_app()
+    controller = FakeMarketplaceController()
+    screen = MarketplaceScreen(
+        "candidate", controller=controller, invitation_controller=FakeInvitations()
+    )
+    _WIDGETS.append(screen)
+    assert screen.apps_table.rowCount() == 1
+    screen.apps_table.selectRow(0)
+    monkeypatch.setattr(
+        "client.views.marketplace_screen.QMessageBox.question",
+        lambda *args, **kwargs: __import__("PySide6.QtWidgets", fromlist=["QMessageBox"])
+            .QMessageBox.StandardButton.Yes,
+    )
+    screen._respond_selected_offer(True)
+    assert ("offer_reply", (12, True)) in controller.calls
+    screen.close()
     app.processEvents()
