@@ -68,6 +68,8 @@ def table(columns: list[str]) -> QTableWidget:
     widget.verticalHeader().setDefaultSectionSize(46)
     widget.setShowGrid(False)
     widget.setWordWrap(False)
+    if columns and columns[0] in ("ID", "Mã"):
+        widget.setColumnHidden(0, True)
     widget.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
     return widget
 
