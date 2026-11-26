@@ -800,7 +800,7 @@ class MarketplaceScreen(QWidget):
             if privacy.success:
                 self.visibility.setChecked(bool(privacy.data))
                 self.privacy_status.setText(
-                    "Hồ sơ đang được phép xuất hiện trong tìm kiếm của doanh nghiệp."
+                    "Hồ sơ đang công khai trong kết quả tìm kiếm của doanh nghiệp."
                     if bool(privacy.data) else "Hồ sơ hiện không được công khai trong tìm kiếm."
                 )
         else:
