@@ -214,7 +214,7 @@ class MarketplaceScreen(QWidget):
         header.addWidget(button("Làm mới", self._load_positions, True))
         layout.addLayout(header)
         self.positions.currentIndexChanged.connect(self._load_applicants)
-        self.applicants_table = table(["ID", "Ứng viên", "Giới thiệu", "Trạng thái", "Ngày ứng tuyển"])
+        self.applicants_table = table(["ID", "Ứng viên", "Giới thiệu", "Trạng thái", "Ngày ứng tuyển", "Phản hồi đề nghị"])
         layout.addWidget(self.applicants_table, 1)
         actions = QHBoxLayout()
         actions.addWidget(QLabel("Chuyển trạng thái:"))
@@ -456,7 +456,7 @@ class MarketplaceScreen(QWidget):
         result = self.controller.applicants(int(job_id))
         if self._result(result):
             populate(self.applicants_table, list(result.data),
-                     ["id", "full_name", "headline", "status", "applied_at"])
+                     ["id", "full_name", "headline", "status", "applied_at", "offer_response"])
 
     def _update_selected(self) -> None:
         application_id = selected_id(self.applicants_table)
