@@ -651,13 +651,13 @@ class _ContentArea(QWidget):
             "candidate": "KHÔNG GIAN ỨNG VIÊN",
             "expert": "KHÔNG GIAN CHUYÊN GIA",
         }
-        eyebrow = QLabel(section_labels.get(self._user.role, "SKILLPROOF"))
+        eyebrow = QLabel(f"{section_labels.get(self._user.role, 'SKILLPROOF')}  ·  {self._user.display_name}")
         eyebrow.setStyleSheet(
             "QLabel { color: #3569A2; background: transparent; font-size: 11px;"
             " font-weight: 700; }"
         )
         layout.addWidget(eyebrow)
-        title = QLabel(f"Xin chào, {self._user.display_name}")
+        title = QLabel(ROLE_CONFIG[self._user.role]["title"])
         title.setWordWrap(True)
         title.setStyleSheet(
             "QLabel { color: #142B45; background: transparent;"
