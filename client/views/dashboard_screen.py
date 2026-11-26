@@ -220,7 +220,7 @@ class _Sidebar(QWidget):
         if self._user.role == "company":
             groups = [
                 ("TUYỂN DỤNG", [
-                    ("▣", "Vị trí tuyển dụng", self._handle_open_company_recruitment),
+                    ("▣", "Tuyển dụng & đánh giá", self._handle_open_company_recruitment),
                     ("◉", "Hồ sơ ứng tuyển", self._handle_open_marketplace),
                     ("◷", "Phỏng vấn", lambda: self._handle_open_extended_workflow("interviews")),
                     ("▤", "Chấm bài đánh giá", lambda: self._handle_open_extended_workflow("manual_grading")),
