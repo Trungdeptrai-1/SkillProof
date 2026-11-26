@@ -393,9 +393,9 @@ class MarketplaceScreen(QWidget):
                 title = str(job.get("title") or "Vị trí tuyển dụng")
                 company = str(job.get("company_name") or "Doanh nghiệp")
                 location = str(job.get("location") or "Chưa cập nhật địa điểm")
-                card_text = f"{title}\\n{company}  •  {location}"
+                card_text = f"{title}\n{company}  •  {location}"
                 if state:
-                    card_text += f"\\n{state}"
+                    card_text += f"\n{state}"
                 item = QListWidgetItem(card_text)
                 self.job_cards.addItem(item)
                 item.setSizeHint(QSize(240, 88))
