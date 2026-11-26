@@ -18,6 +18,9 @@ class MarketplaceController:
     def my_applications(self) -> MarketplaceResult:
         return self._service.my_applications()
 
+    def respond_to_offer(self, application_id: int, accepted: bool) -> MarketplaceResult:
+        return self._service.respond_to_offer(application_id, accepted)
+
     def saved_jobs(self) -> MarketplaceResult:
         return self._service.saved_jobs()
 

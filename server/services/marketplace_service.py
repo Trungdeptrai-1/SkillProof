@@ -83,6 +83,15 @@ class MarketplaceService:
         actor = self._actor("candidate")
         return actor if isinstance(actor, MarketplaceResult) else self._invoke(self._repo.my_applications, actor)
 
+    def respond_to_offer(self, application_id: int, accepted: bool) -> MarketplaceResult:
+        """Reply to an employer's final offer; applicant identity comes from session."""
+        actor = self._actor("candidate")
+        if isinstance(actor, MarketplaceResult):
+            return actor
+        if not self._valid_id(application_id) or type(accepted) is not bool:
+            return MarketplaceResult("invalid_input")
+        return self._invoke(self._repo.respond_to_offer, actor, application_id, accepted)
+
     def saved_jobs(self) -> MarketplaceResult:
         actor = self._actor("candidate")
         return actor if isinstance(actor, MarketplaceResult) else self._invoke(self._repo.saved_jobs, actor)

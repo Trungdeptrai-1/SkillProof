@@ -159,9 +159,14 @@ class MarketplaceScreen(QWidget):
         mine = QWidget()
         mine_layout = QVBoxLayout(mine)
         mine_layout.addWidget(button("Làm mới đơn ứng tuyển", self._load_applications))
-        self.apps_table = table(["ID", "Vị trí", "Công ty", "Trạng thái", "Ngày ứng tuyển", "Phản hồi tuyển dụng"])
+        self.apps_table = table(["ID", "Vị trí", "Công ty", "Trạng thái", "Ngày ứng tuyển", "Phản hồi tuyển dụng", "Trả lời đề nghị"])
         mine_layout.addWidget(self.apps_table)
-        mine_layout.addWidget(button("Rút đơn đã chọn", self._withdraw_selected))
+        offer_actions = QHBoxLayout()
+        offer_actions.addWidget(button("Rút đơn đã chọn", self._withdraw_selected))
+        offer_actions.addStretch()
+        offer_actions.addWidget(button("Chấp nhận đề nghị", lambda: self._respond_selected_offer(True), True))
+        offer_actions.addWidget(button("Từ chối đề nghị", lambda: self._respond_selected_offer(False)))
+        mine_layout.addLayout(offer_actions)
         self.tabs.addTab(mine, "Đơn ứng tuyển của tôi")
 
         saved = QWidget()
@@ -209,7 +214,7 @@ class MarketplaceScreen(QWidget):
         header.addWidget(button("Làm mới", self._load_positions, True))
         layout.addLayout(header)
         self.positions.currentIndexChanged.connect(self._load_applicants)
-        self.applicants_table = table(["ID", "Ứng viên", "Giới thiệu", "Trạng thái", "Ngày ứng tuyển"])
+        self.applicants_table = table(["ID", "Ứng viên", "Giới thiệu", "Trạng thái", "Ngày ứng tuyển", "Phản hồi đề nghị"])
         layout.addWidget(self.applicants_table, 1)
         actions = QHBoxLayout()
         actions.addWidget(QLabel("Chuyển trạng thái:"))
@@ -382,7 +387,31 @@ class MarketplaceScreen(QWidget):
     def _load_applications(self) -> None:
         result = self.controller.my_applications()
         if self._result(result):
-            populate(self.apps_table, list(result.data), ["id", "title", "company_name", "status", "applied_at", "decision_note"])
+            populate(self.apps_table, list(result.data), ["id", "title", "company_name", "status", "applied_at", "decision_note", "offer_response"])
+
+    def _respond_selected_offer(self, accepted: bool) -> None:
+        application_id = selected_id(self.apps_table)
+        if application_id is None:
+            self.status.setText("Hãy chọn đơn có đề nghị tuyển dụng.")
+            return
+        row = self.apps_table.currentRow()
+        status_cell = self.apps_table.item(row, 3)
+        response_cell = self.apps_table.item(row, 6)
+        if status_cell is None or status_cell.text() != "offered":
+            self.status.setText("Chỉ có thể trả lời đơn đã nhận đề nghị tuyển dụng.")
+            return
+        if response_cell is not None and response_cell.text():
+            self.status.setText("Bạn đã phản hồi đề nghị này, không thể trả lời lần nữa.")
+            return
+        action = "chấp nhận" if accepted else "từ chối"
+        if QMessageBox.question(
+            self, "Xác nhận đề nghị tuyển dụng",
+            f"Bạn chắc chắn muốn {action} đề nghị tuyển dụng này? Phản hồi không thể thay đổi."
+        ) != QMessageBox.StandardButton.Yes:
+            return
+        result = self.controller.respond_to_offer(application_id, accepted)
+        if self._result(result, "Đã ghi nhận phản hồi đề nghị tuyển dụng."):
+            self._load_applications()
 
     def _withdraw_selected(self) -> None:
         application_id = selected_id(self.apps_table)
@@ -427,7 +456,7 @@ class MarketplaceScreen(QWidget):
         result = self.controller.applicants(int(job_id))
         if self._result(result):
             populate(self.applicants_table, list(result.data),
-                     ["id", "full_name", "headline", "status", "applied_at"])
+                     ["id", "full_name", "headline", "status", "applied_at", "offer_response"])
 
     def _update_selected(self) -> None:
         application_id = selected_id(self.applicants_table)
