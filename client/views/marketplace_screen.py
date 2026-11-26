@@ -12,24 +12,30 @@ from server.controllers.direct_invitation_controller import DirectInvitationCont
 
 
 STYLE = """
-QWidget#MarketplaceRoot { background: #F8FAFC; color: #1E293B; font-family: 'Segoe UI'; }
-QLabel#PageTitle { font-size: 24px; font-weight: 700; color: #172B4D; }
+QWidget#MarketplaceRoot { background: #F4F7FB; color: #172B4D; font-family: 'Segoe UI'; }
+QLabel { background: transparent; border: none; }
+QCheckBox { background: transparent; spacing: 10px; color: #334155; }
+QLabel#PageTitle { font-size: 26px; font-weight: 700; color: #12233F; }
 QLabel#SectionTitle { font-size: 15px; font-weight: 650; color: #172B4D; }
 QLabel#Status { color: #475569; font-size: 12px; }
-QLineEdit, QTextEdit, QComboBox { background: white; border: 1px solid #CBD5E1;
-    border-radius: 7px; padding: 8px; font-size: 13px; color: #0F172A; }
-QPushButton { background: white; color: #1E40AF; border: 1px solid #CBD5E1;
-    border-radius: 7px; padding: 8px 12px; font-weight: 600; }
+QLineEdit, QTextEdit, QComboBox, QDateTimeEdit { background: white; border: 1px solid #D8E1ED;
+    border-radius: 9px; padding: 10px; font-size: 13px; color: #172B4D; selection-background-color: #D9E9FF; }
+QLineEdit:focus, QTextEdit:focus, QComboBox:focus, QDateTimeEdit:focus { border: 1px solid #3185D9; }
+QPushButton { background: white; color: #1E4D7B; border: 1px solid #D8E1ED;
+    border-radius: 9px; padding: 10px 16px; font-weight: 600; }
 QPushButton:hover { background: #EFF6FF; }
 QPushButton#Primary { background: #2563EB; color: white; border: none; }
 QPushButton#Primary:hover { background: #1D4ED8; }
-QTableWidget { background: white; alternate-background-color: #F8FAFC;
-    border: 1px solid #E2E8F0; border-radius: 8px; gridline-color: #E2E8F0; }
-QHeaderView::section { background: #EAF0F8; color: #334155;
-    padding: 9px; border: none; font-weight: 600; }
-QTabWidget::pane { border: none; }
-QTabBar::tab { padding: 10px 18px; }
-QTabBar::tab:selected { color: #1D4ED8; border-bottom: 2px solid #2563EB; }
+QTableWidget { background: white; alternate-background-color: #F7F9FC;
+    border: 1px solid #DCE5F1; border-radius: 10px; gridline-color: #EDF1F7;
+    color: #172B4D; selection-background-color: #E3F0FF; selection-color: #102A46; }
+QHeaderView::section { background: #EFF4FA; color: #435570;
+    padding: 12px; border: none; border-bottom: 1px solid #DAE3EE; font-weight: 600; }
+QTabWidget::pane { border: none; background: transparent; }
+QTabBar::tab { background: transparent; color: #64748B; padding: 13px 18px;
+    border: none; border-bottom: 2px solid transparent; }
+QTabBar::tab:hover { color: #1E4D7B; }
+QTabBar::tab:selected { color: #1D4ED8; border-bottom: 2px solid #3185D9; font-weight: 700; }
 """
 
 
@@ -50,6 +56,9 @@ def table(columns: list[str]) -> QTableWidget:
     widget.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
     widget.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
     widget.verticalHeader().setVisible(False)
+    widget.verticalHeader().setDefaultSectionSize(46)
+    widget.setShowGrid(False)
+    widget.setWordWrap(False)
     widget.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
     return widget
 
@@ -94,8 +103,8 @@ class MarketplaceScreen(QWidget):
 
     def _setup(self) -> None:
         outer = QVBoxLayout(self)
-        outer.setContentsMargins(30, 24, 30, 24)
-        outer.setSpacing(16)
+        outer.setContentsMargins(36, 30, 36, 24)
+        outer.setSpacing(20)
         header = QHBoxLayout()
         title = QLabel(
             "Khám phá cơ hội việc làm" if self.role == "candidate"
@@ -142,11 +151,12 @@ class MarketplaceScreen(QWidget):
         self.details = QTextEdit()
         self.details.setReadOnly(True)
         self.details.setPlaceholderText("Chọn một vị trí để xem mô tả và yêu cầu.")
-        self.details.setMaximumHeight(115)
+        self.details.setMinimumHeight(128)
+        self.details.setMaximumHeight(190)
         layout.addWidget(self.details)
         self.cover_letter = QTextEdit()
         self.cover_letter.setPlaceholderText("Lời giới thiệu khi ứng tuyển (không bắt buộc, tối đa 4000 ký tự)")
-        self.cover_letter.setMaximumHeight(78)
+        self.cover_letter.setMaximumHeight(100)
         layout.addWidget(self.cover_letter)
         actions = QHBoxLayout()
         actions.addWidget(button("Lưu việc làm", self._save_selected))
