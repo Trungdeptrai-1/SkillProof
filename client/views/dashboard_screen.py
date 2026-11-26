@@ -249,36 +249,58 @@ class _Sidebar(QWidget):
                     layout.addSpacing(3)
                 layout.addSpacing(12)
         else:
-            cfg = ROLE_CONFIG.get(self._user.role, ROLE_CONFIG["candidate"])
-            linked = {
-                "candidate": {"Hồ sơ cá nhân", "Lời mời làm bài", "Khám phá cơ hội",
-                              "Bài tự luận & Coding", "Giám sát phiên thi", "Phỏng vấn", "Chứng chỉ"},
-                "expert": {"Hồ sơ chuyên gia", "Hợp đồng của tôi", "Nhiệm vụ của tôi",
-                           "Chấm bài tự luận/Coding", "Lịch phỏng vấn", "Chứng chỉ"},
+            groups = {
+                "candidate": [
+                    ("TÌM VIỆC", ["Khám phá cơ hội", "Hồ sơ cá nhân"]),
+                    ("ĐÁNH GIÁ NĂNG LỰC", [
+                        "Lời mời làm bài", "Bài tự luận & Coding",
+                        "Giám sát phiên thi", "Phỏng vấn", "Chứng chỉ",
+                    ]),
+                ],
+                "expert": [
+                    ("CHUYÊN MÔN", ["Hồ sơ chuyên gia",
+                                     "Chấm bài tự luận/Coding", "Lịch phỏng vấn"]),
+                    ("HỢP TÁC", ["Hợp đồng của tôi", "Nhiệm vụ của tôi", "Chứng chỉ"]),
+                ],
             }
-            for icon, label, _ in cfg["features"]:
-                if label not in linked.get(self._user.role, set()):
-                    continue
-                btn = self._make_menu_item(icon, label)
-                if self._user.role == "candidate" and label == "Hồ sơ cá nhân":
-                    btn.clicked.connect(self._handle_open_candidate_profile)
-                elif self._user.role == "candidate" and label == "Lời mời làm bài":
-                    btn.clicked.connect(self._handle_open_candidate_assessments)
-                elif self._user.role == "candidate" and label == "Khám phá cơ hội":
-                    btn.clicked.connect(self._handle_open_marketplace)
-                elif self._user.role == "expert" and label == "Hồ sơ chuyên gia":
-                    btn.clicked.connect(self._handle_open_expert_profile)
-                elif self._user.role == "expert" and label == "Hợp đồng của tôi":
-                    btn.clicked.connect(self._handle_open_contracts)
-                elif self._user.role == "expert" and label == "Nhiệm vụ của tôi":
-                    btn.clicked.connect(self._handle_open_tasks)
-                elif label in EXTENDED_WORKFLOW_ROUTES:
-                    btn.clicked.connect(
-                        lambda checked=False, route=EXTENDED_WORKFLOW_ROUTES[label]:
-                        self._handle_open_extended_workflow(route)
-                    )
-                layout.addWidget(btn)
-                layout.addSpacing(3)
+            available = {
+                label: icon for icon, label, _ in
+                ROLE_CONFIG.get(self._user.role, ROLE_CONFIG["candidate"])["features"]
+            }
+            for section, labels in groups.get(self._user.role, []):
+                caption = QLabel(section)
+                caption.setStyleSheet(
+                    "QLabel { color: #AFC2D8; background: transparent; border: none;"
+                    " font-size: 10px; font-weight: 700; padding-left: 8px; }"
+                )
+                layout.addWidget(caption)
+                layout.addSpacing(7)
+                for label in labels:
+                    if label not in available:
+                        continue
+                    btn = self._make_menu_item(available[label], label)
+                    if self._user.role == "candidate" and label == "Hồ sơ cá nhân":
+                        btn.clicked.connect(self._handle_open_candidate_profile)
+                    elif self._user.role == "candidate" and label == "Lời mời làm bài":
+                        btn.clicked.connect(self._handle_open_candidate_assessments)
+                    elif self._user.role == "candidate" and label == "Khám phá cơ hội":
+                        btn.clicked.connect(self._handle_open_marketplace)
+                    elif self._user.role == "expert" and label == "Hồ sơ chuyên gia":
+                        btn.clicked.connect(self._handle_open_expert_profile)
+                    elif self._user.role == "expert" and label == "Hợp đồng của tôi":
+                        btn.clicked.connect(self._handle_open_contracts)
+                    elif self._user.role == "expert" and label == "Nhiệm vụ của tôi":
+                        btn.clicked.connect(self._handle_open_tasks)
+                    elif label in EXTENDED_WORKFLOW_ROUTES:
+                        btn.clicked.connect(
+                            lambda checked=False, route=EXTENDED_WORKFLOW_ROUTES[label]:
+                            self._handle_open_extended_workflow(route)
+                        )
+                    else:
+                        continue
+                    layout.addWidget(btn)
+                    layout.addSpacing(3)
+                layout.addSpacing(12)
 
         layout.addStretch()
 
