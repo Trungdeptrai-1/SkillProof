@@ -7,6 +7,8 @@ from collections.abc import Callable
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QFormLayout,
+    QFrame,
+    QHeaderView,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -86,14 +88,31 @@ class CertificateScreen(QWidget):
                 "Hết hạn",
             ]
         )
+        self._table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self._table.horizontalHeader().setMinimumSectionSize(80)
+        self._table.verticalHeader().setVisible(False)
+        self._table.verticalHeader().setDefaultSectionSize(42)
+        self._table.setAlternatingRowColors(True)
+        self._table.setShowGrid(False)
         self._table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self._table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self._table.itemSelectionChanged.connect(self._selection_changed)
         layout.addWidget(self._table, stretch=1)
 
         self._management_section = QWidget()
-        management = QHBoxLayout(self._management_section)
+        management = QVBoxLayout(self._management_section)
         management.setContentsMargins(0, 0, 0, 0)
+        management.setSpacing(14)
+
+        self._verify_panel = QFrame()
+        self._verify_panel.setObjectName("CertificateVerifyPanel")
+        self._verify_panel.setStyleSheet(
+            "QFrame#CertificateVerifyPanel { background: #FFFFFF;"
+            " border: 1px solid #DEE7F0; border-radius: 12px; }"
+        )
+        verify_box = QVBoxLayout(self._verify_panel)
+        verify_box.setContentsMargins(18, 15, 18, 15)
+        verify_box.addWidget(QLabel("Tra cứu và xác minh chứng chỉ"))
         verify_form = QFormLayout()
         self._verify_code = QLineEdit()
         self._verify_code.setPlaceholderText("Nhập mã chứng chỉ")
@@ -102,8 +121,18 @@ class CertificateScreen(QWidget):
         self._verify_button.clicked.connect(self._verify_certificate)
         verify_form.addRow("Mã chứng chỉ", self._verify_code)
         verify_form.addRow(self._verify_button)
-        management.addLayout(verify_form)
+        verify_box.addLayout(verify_form)
+        management.addWidget(self._verify_panel)
 
+        self._issue_panel = QFrame()
+        self._issue_panel.setObjectName("CertificateIssuePanel")
+        self._issue_panel.setStyleSheet(
+            "QFrame#CertificateIssuePanel { background: #FFFFFF;"
+            " border: 1px solid #DEE7F0; border-radius: 12px; }"
+        )
+        issue_box = QVBoxLayout(self._issue_panel)
+        issue_box.setContentsMargins(18, 15, 18, 15)
+        issue_box.addWidget(QLabel("Cấp chứng chỉ — nghiệp vụ quản trị"))
         issue_form = QFormLayout()
         self._user_id = QSpinBox()
         self._user_id.setRange(0, 2147483647)
@@ -118,10 +147,11 @@ class CertificateScreen(QWidget):
             primary_button_style(font_size=12, padding="8px 14px")
         )
         self._issue_button.clicked.connect(self._issue_certificate)
-        issue_form.addRow("Candidate ID", self._user_id)
-        issue_form.addRow("Skill ID", self._skill_id)
+        issue_form.addRow("Mã tài khoản ứng viên", self._user_id)
+        issue_form.addRow("Mã kỹ năng", self._skill_id)
         issue_form.addRow(self._issue_button)
-        management.addLayout(issue_form)
+        issue_box.addLayout(issue_form)
+        management.addWidget(self._issue_panel)
         self._revoke_button = QPushButton("Thu hồi chứng chỉ đã chọn")
         self._revoke_button.setStyleSheet(secondary_button_style(font_size=12))
         self._revoke_button.clicked.connect(self._revoke_certificate)
@@ -168,7 +198,11 @@ class CertificateScreen(QWidget):
                 certificate.subject_name,
                 certificate.skill_name,
                 f"{certificate.score:g}" if certificate.score is not None else "—",
-                certificate.status,
+                {
+                    "active": "Có hiệu lực",
+                    "revoked": "Đã thu hồi",
+                    "expired": "Hết hạn",
+                }.get(certificate.status, certificate.status),
                 certificate.issued_at,
                 certificate.expires_at or "Không thời hạn",
             )
@@ -184,6 +218,9 @@ class CertificateScreen(QWidget):
         self._revoke_button.setEnabled(False)
 
     def _set_management_enabled(self, can_issue: bool, can_verify: bool) -> None:
+        self._issue_panel.setVisible(can_issue)
+        self._verify_panel.setVisible(can_verify)
+        self._management_section.setVisible(can_issue or can_verify)
         self._issue_button.setEnabled(can_issue)
         self._user_id.setEnabled(can_issue)
         self._skill_id.setEnabled(can_issue)
