@@ -226,12 +226,12 @@ class _Sidebar(QWidget):
                     ("▤", "Chấm bài đánh giá", lambda: self._handle_open_extended_workflow("manual_grading")),
                 ]),
                 ("HỒ SƠ", [
-                    ("▦", "Thông tin doanh nghiệp", self._handle_open_company_profile),
+                    ("▦", "Hồ sơ doanh nghiệp", self._handle_open_company_profile),
                 ]),
                 ("HỢP TÁC CHUYÊN MÔN", [
                     ("⌕", "Tìm chuyên gia", self._handle_open_expert_search),
-                    ("▣", "Hợp đồng chuyên gia", self._handle_open_contracts),
-                    ("✓", "Nhiệm vụ hợp tác", self._handle_open_tasks),
+                    ("▣", "Hợp đồng của tôi", self._handle_open_contracts),
+                    ("✓", "Nhiệm vụ của tôi", self._handle_open_tasks),
                 ]),
             ]
             for section, items in groups:
