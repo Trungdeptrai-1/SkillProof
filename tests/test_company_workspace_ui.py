@@ -88,3 +88,22 @@ def test_candidate_and_expert_overviews_use_wired_workflow_actions():
         dashboard.close()
         dashboard.deleteLater()
     app.processEvents()
+
+def test_localized_workflow_status_keeps_machine_value():
+    from PySide6.QtCore import Qt
+    from client.views.marketplace_screen import table, populate
+    app = QApplication.instance() or QApplication([])
+    statuses = ("shortlisted", "assessment", "interview", "offered")
+    widget = table(["ID", "Trạng thái"])
+    populate(widget, [
+        {"id": index + 1, "status": status}
+        for index, status in enumerate(statuses)
+    ], ["id", "status"])
+    assert widget.isColumnHidden(0)
+    for index, status in enumerate(statuses):
+        cell = widget.item(index, 1)
+        assert cell.text() != status
+        assert cell.data(Qt.ItemDataRole.UserRole + 1) == status
+    widget.close()
+    widget.deleteLater()
+    app.processEvents()
