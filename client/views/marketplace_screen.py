@@ -279,7 +279,7 @@ class MarketplaceScreen(QWidget):
                               alignment=Qt.AlignmentFlag.AlignRight)
         self.apps_table = table(["ID", "Vị trí", "Công ty", "Trạng thái",
                                  "Ngày ứng tuyển", "Phản hồi tuyển dụng", "Trả lời đề nghị"])
-        self.apps_feed, apps_detail, self.apps_heading, self.apps_summary = self._candidate_feed_sections(
+        self.apps_feed, apps_panel, apps_detail, self.apps_heading, self.apps_summary = self._candidate_feed_sections(
             "Chọn một đơn ứng tuyển", "Trạng thái, phản hồi và các thao tác sẽ hiển thị ở đây."
         )
         self.apps_table.itemSelectionChanged.connect(
@@ -298,7 +298,7 @@ class MarketplaceScreen(QWidget):
         apps_actions.addWidget(self.decline_offer_button)
         apps_detail.addLayout(apps_actions)
         apps_detail.addStretch()
-        self._candidate_feed_layout(mine_layout, self.apps_feed, apps_detail)
+        self._candidate_feed_layout(mine_layout, self.apps_feed, apps_panel)
         self.tabs.addTab(mine, "Đơn ứng tuyển của tôi")
 
         saved = QWidget()
@@ -311,7 +311,7 @@ class MarketplaceScreen(QWidget):
         saved_layout.addWidget(button("Làm mới việc đã lưu", self._load_saved_jobs),
                                alignment=Qt.AlignmentFlag.AlignRight)
         self.saved_table = table(["ID", "Vị trí", "Công ty", "Địa điểm", "Trạng thái", "Đã ứng tuyển"])
-        self.saved_feed, saved_detail, self.saved_heading, self.saved_summary = self._candidate_feed_sections(
+        self.saved_feed, saved_panel, saved_detail, self.saved_heading, self.saved_summary = self._candidate_feed_sections(
             "Chọn công việc đã lưu", "Xem tình trạng tin tuyển dụng và bỏ lưu khi không còn quan tâm."
         )
         self.saved_table.itemSelectionChanged.connect(
@@ -320,7 +320,7 @@ class MarketplaceScreen(QWidget):
         self.unsave_button = button("Bỏ lưu công việc", self._unsave_saved_job)
         saved_detail.addWidget(self.unsave_button)
         saved_detail.addStretch()
-        self._candidate_feed_layout(saved_layout, self.saved_feed, saved_detail)
+        self._candidate_feed_layout(saved_layout, self.saved_feed, saved_panel)
         self.tabs.addTab(saved, "Việc làm đã lưu")
 
         privacy = QWidget()
@@ -368,7 +368,7 @@ class MarketplaceScreen(QWidget):
         invites_layout.addWidget(button("Làm mới lời mời", self._load_received_invites),
                                  alignment=Qt.AlignmentFlag.AlignRight)
         self.received_table = table(["ID", "Vị trí", "Công ty", "Lời nhắn", "Trạng thái", "Ngày gửi"])
-        self.invites_feed, invites_detail, self.invites_heading, self.invites_summary = self._candidate_feed_sections(
+        self.invites_feed, invites_panel, invites_detail, self.invites_heading, self.invites_summary = self._candidate_feed_sections(
             "Chọn một lời mời", "Đọc nội dung lời mời từ doanh nghiệp trước khi quyết định."
         )
         self.received_table.itemSelectionChanged.connect(
@@ -383,7 +383,7 @@ class MarketplaceScreen(QWidget):
         invites_detail.addWidget(self.invite_accept_button)
         invites_detail.addWidget(self.invite_decline_button)
         invites_detail.addStretch()
-        self._candidate_feed_layout(invites_layout, self.invites_feed, invites_detail)
+        self._candidate_feed_layout(invites_layout, self.invites_feed, invites_panel)
         self.tabs.addTab(invites, "Lời mời tuyển dụng")
 
         self._candidate_data = {"applications": [], "saved": [], "invites": []}
@@ -413,7 +413,7 @@ class MarketplaceScreen(QWidget):
 
     def _candidate_feed_sections(
         self, heading: str, description: str
-    ) -> tuple[QListWidget, QVBoxLayout, QLabel, QLabel]:
+    ) -> tuple[QListWidget, QFrame, QVBoxLayout, QLabel, QLabel]:
         feed = QListWidget()
         feed.setObjectName("CandidateFeed")
         feed.setSpacing(4)
@@ -433,14 +433,13 @@ class MarketplaceScreen(QWidget):
         summary.setWordWrap(True)
         side.addWidget(title)
         side.addWidget(summary)
-        return feed, side, title, summary
+        return feed, panel, side, title, summary
 
     def _candidate_feed_layout(self, parent: QVBoxLayout,
-                               feed: QListWidget, detail: QVBoxLayout) -> None:
+                               feed: QListWidget, panel: QFrame) -> None:
         row = QHBoxLayout()
         row.setSpacing(18)
         row.addWidget(feed, 5)
-        panel = detail.parentWidget()
         row.addWidget(panel, 4)
         parent.addLayout(row, 1)
 
