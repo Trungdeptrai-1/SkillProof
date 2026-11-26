@@ -76,7 +76,23 @@ def populate(widget: QTableWidget, rows: list[dict], columns: list[str]) -> None
     widget.setRowCount(len(rows))
     for row_index, item in enumerate(rows):
         for col_index, field in enumerate(columns):
-            cell = QTableWidgetItem(str(item.get(field) or ""))
+            raw_value = item.get(field)
+            display = {
+                "published": "Đang tuyển",
+                "draft": "Bản nháp",
+                "closed": "Đã đóng",
+                "applied": "Đã ứng tuyển",
+                "reviewing": "Đang xem xét",
+                "shortlisted": "Vào danh sách chọn",
+                "rejected": "Đã từ chối",
+                "withdrawn": "Đã rút đơn",
+                "offered": "Đã gửi đề nghị",
+                "accepted": "Đã chấp nhận",
+                "declined": "Đã từ chối",
+            }.get(str(raw_value), str(raw_value) if raw_value is not None else "")
+            cell = QTableWidgetItem(display)
+            if field in ("status", "offer_response"):
+                cell.setData(Qt.ItemDataRole.UserRole + 1, raw_value)
             if col_index == 0:
                 cell.setData(Qt.ItemDataRole.UserRole, int(item["id"]))
             widget.setItem(row_index, col_index, cell)
@@ -117,7 +133,7 @@ class MarketplaceScreen(QWidget):
         header = QHBoxLayout()
         title = QLabel(
             "Khám phá cơ hội việc làm" if self.role == "candidate"
-            else "Trung tâm ứng viên"
+            else "Quản lý hồ sơ ứng tuyển"
         )
         title.setObjectName("PageTitle")
         header.addWidget(title)
@@ -270,8 +286,22 @@ class MarketplaceScreen(QWidget):
         header.addWidget(button("Làm mới", self._load_positions, True))
         layout.addLayout(header)
         self.positions.currentIndexChanged.connect(self._load_applicants)
-        self.applicants_table = table(["ID", "Ứng viên", "Giới thiệu", "Trạng thái", "Ngày ứng tuyển", "Phản hồi đề nghị"])
-        layout.addWidget(self.applicants_table, 1)
+        self.applicants_table = table(["Mã", "Ứng viên", "Giới thiệu", "Trạng thái", "Ngày ứng tuyển", "Phản hồi đề nghị"])
+        self.applicants_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        self.applicants_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        self.applicants_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+        layout.addWidget(self.applicants_table, 3)
+
+        hint = QLabel("Chọn một ứng viên trong danh sách, sau đó chọn bước xử lý bên dưới.")
+        hint.setObjectName("Status")
+        layout.addWidget(hint)
+        stages = QTabWidget()
+        stages.setObjectName("HiringWorkflowTabs")
+        layout.addWidget(stages, 2)
+
+        review = QWidget()
+        review_layout = QVBoxLayout(review)
+        review_layout.setContentsMargins(12, 14, 12, 12)
         actions = QHBoxLayout()
         actions.addWidget(QLabel("Chuyển trạng thái:"))
         self.stage = QComboBox()
@@ -281,7 +311,13 @@ class MarketplaceScreen(QWidget):
         actions.addWidget(self.stage)
         actions.addStretch()
         actions.addWidget(button("Cập nhật hồ sơ đã chọn", self._update_selected, True))
-        layout.addLayout(actions)
+        review_layout.addLayout(actions)
+        review_layout.addStretch()
+        stages.addTab(review, "1. Sàng lọc")
+
+        assessment = QWidget()
+        assessment_layout = QVBoxLayout(assessment)
+        assessment_layout.setContentsMargins(12, 14, 12, 12)
         assessment_controls = QHBoxLayout()
         assessment_controls.addWidget(QLabel("Bài thi đã công bố:"))
         self.assessment_exams = QComboBox()
@@ -290,7 +326,13 @@ class MarketplaceScreen(QWidget):
         assessment_controls.addWidget(
             button("Mời ứng viên đã chọn làm bài", self._invite_selected_to_exam, True)
         )
-        layout.addLayout(assessment_controls)
+        assessment_layout.addLayout(assessment_controls)
+        assessment_layout.addStretch()
+        stages.addTab(assessment, "2. Bài đánh giá")
+
+        interview = QWidget()
+        interview_layout = QVBoxLayout(interview)
+        interview_layout.setContentsMargins(12, 14, 12, 12)
         interview_controls = QHBoxLayout()
         self.interview_title = QLineEdit()
         self.interview_title.setPlaceholderText("Tên buổi phỏng vấn")
@@ -304,11 +346,17 @@ class MarketplaceScreen(QWidget):
         interview_controls.addWidget(self.interview_title, 2)
         interview_controls.addWidget(self.interview_datetime, 1)
         interview_controls.addWidget(self.interview_url, 2)
-        layout.addLayout(interview_controls)
-        layout.addWidget(button(
+        interview_layout.addLayout(interview_controls)
+        interview_layout.addWidget(button(
             "Lên lịch phỏng vấn sau khi công bố kết quả thi",
             self._schedule_selected_interview, True
         ))
+        interview_layout.addStretch()
+        stages.addTab(interview, "3. Phỏng vấn")
+
+        decision = QWidget()
+        decision_layout = QVBoxLayout(decision)
+        decision_layout.setContentsMargins(12, 14, 12, 12)
         decision_controls = QHBoxLayout()
         self.hiring_note = QLineEdit()
         self.hiring_note.setMaxLength(2000)
@@ -320,7 +368,9 @@ class MarketplaceScreen(QWidget):
         decision_controls.addWidget(button(
             "Từ chối sau phỏng vấn", lambda: self._decide_selected("rejected")
         ))
-        layout.addLayout(decision_controls)
+        decision_layout.addLayout(decision_controls)
+        decision_layout.addStretch()
+        stages.addTab(decision, "4. Quyết định")
         self.tabs.addTab(applicants, "Hồ sơ ứng tuyển")
 
         talents = QWidget()
@@ -487,7 +537,7 @@ class MarketplaceScreen(QWidget):
         row = self.apps_table.currentRow()
         status_cell = self.apps_table.item(row, 3)
         response_cell = self.apps_table.item(row, 6)
-        if status_cell is None or status_cell.text() != "offered":
+        if status_cell is None or (status_cell.data(Qt.ItemDataRole.UserRole + 1) or status_cell.text()) != "offered":
             self.status.setText("Chỉ có thể trả lời đơn đã nhận đề nghị tuyển dụng.")
             return
         if response_cell is not None and response_cell.text():
