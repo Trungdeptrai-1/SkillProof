@@ -58,3 +58,33 @@ def test_company_sidebar_is_grouped_by_business_workflow():
     screen.close()
     screen.deleteLater()
     app.processEvents()
+
+def test_candidate_and_expert_overviews_use_wired_workflow_actions():
+    app = QApplication.instance() or QApplication([])
+    cases = (
+        ("candidate", ["jobs", "profile", "assessment", "interviews"]),
+        ("expert", ["profile", "grading", "interviews", "contracts"]),
+    )
+    for role, expected in cases:
+        user = _company()
+        user.role = role
+        dashboard = DashboardScreen(user)
+        events = []
+        dashboard.on_open_marketplace = lambda: events.append("jobs")
+        dashboard.on_open_candidate_profile = lambda: events.append("profile")
+        dashboard.on_open_candidate_assessments = lambda: events.append("assessment")
+        dashboard.on_open_expert_profile = lambda: events.append("profile")
+        dashboard.on_open_contracts = lambda: events.append("contracts")
+        dashboard.on_open_extended_workflow = lambda route: events.append(route if route == "interviews" else "grading")
+
+        buttons = [
+            btn for btn in dashboard._content.findChildren(QPushButton)
+            if btn.text() == "Mở chức năng"
+        ]
+        assert len(buttons) == 4
+        for button in buttons:
+            button.click()
+        assert events == expected
+        dashboard.close()
+        dashboard.deleteLater()
+    app.processEvents()
