@@ -52,7 +52,7 @@ def test_company_sidebar_is_grouped_by_business_workflow():
     assert "HỒ SƠ" in labels
     assert "HỢP TÁC CHUYÊN MÔN" in labels
     buttons = [btn.text() for btn in screen._sidebar.findChildren(QPushButton)]
-    assert any("Vị trí tuyển dụng" in text for text in buttons)
+    assert any("Tuyển dụng & đánh giá" in text for text in buttons)
     assert any("Hồ sơ ứng tuyển" in text for text in buttons)
     assert not any("Trong menu" in text for text in buttons)
     screen.close()
