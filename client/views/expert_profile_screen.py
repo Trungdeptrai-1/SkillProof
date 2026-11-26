@@ -201,8 +201,8 @@ class ExpertProfileScreen(QWidget):
 
     def _build_form_card(self) -> None:
         self._card = QFrame()
-        self._card.setObjectName("UiPanel_card")
-        card.setStyleSheet(f"QFrame#UiPanel_card{{background:{COLOR_WHITE};border-radius:12px;border:1px solid {COLOR_LIGHT_GRAY};}}")
+        self._card.setObjectName("UiPanel_form_card")
+        self._card.setStyleSheet(f"QFrame#UiPanel_form_card{{background:{COLOR_WHITE};border-radius:12px;border:1px solid {COLOR_LIGHT_GRAY};}}")
         cl = QVBoxLayout(self._card); cl.setContentsMargins(24, 20, 24, 20); cl.setSpacing(0)
 
         self._card_title = QLabel("Thông tin chuyên môn")
