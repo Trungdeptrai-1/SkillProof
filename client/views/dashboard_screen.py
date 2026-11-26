@@ -59,8 +59,8 @@ ROLE_CONFIG: dict[str, dict] = {
         "accent": "#00695C",
     },
     "candidate": {
-        "title":       "Hồ sơ ứng viên",
-        "description": "Xây dựng hồ sơ kỹ năng và tìm kiếm cơ hội phù hợp.",
+        "title":       "Không gian ứng viên",
+        "description": "Khám phá công việc, theo dõi ứng tuyển và phát triển năng lực.",
         "features": [
             ("👤", "Hồ sơ cá nhân",         "Cập nhật thông tin và kỹ năng"),
             ("🏅", "Kỹ năng của tôi",       "Danh sách và mức độ thành thạo"),
@@ -75,7 +75,7 @@ ROLE_CONFIG: dict[str, dict] = {
     },
     "company": {
         "title":       "Cổng doanh nghiệp",
-        "description": "Tìm kiếm và xác minh ứng viên dựa trên kỹ năng chứng nhận.",
+        "description": "Quản lý cơ hội tuyển dụng, ứng viên và quy trình đánh giá.",
         "features": [
             ("🔎", "Tìm chuyên gia",         "Tìm kiếm và gửi lời mời hợp tác"),
             ("📋", "Hợp đồng của tôi",       "Theo dõi hợp đồng với chuyên gia"),
@@ -217,6 +217,18 @@ class _Sidebar(QWidget):
         # Routes with available screens are connected by MainWindow.
         cfg = ROLE_CONFIG.get(self._user.role, ROLE_CONFIG["candidate"])
         for icon, label, _ in cfg["features"]:
+            # Do not render menu entries without a wired destination.
+            linked = {
+                "candidate": {"Hồ sơ cá nhân", "Lời mời làm bài", "Khám phá cơ hội",
+                              "Bài tự luận & Coding", "Giám sát phiên thi", "Phỏng vấn", "Chứng chỉ"},
+                "company": {"Tìm chuyên gia", "Hợp đồng của tôi", "Nhiệm vụ của tôi",
+                            "Hồ sơ doanh nghiệp", "Tuyển dụng & đánh giá", "Hồ sơ ứng tuyển",
+                            "Chấm bài tự luận/Coding", "Lịch phỏng vấn", "Chứng chỉ"},
+                "expert": {"Hồ sơ chuyên gia", "Hợp đồng của tôi", "Nhiệm vụ của tôi",
+                           "Chấm bài tự luận/Coding", "Lịch phỏng vấn", "Chứng chỉ"},
+            }
+            if label not in linked.get(self._user.role, set()):
+                continue
             btn = self._make_menu_item(icon, label)
             if self._user.role == "candidate" and label == "Hồ sơ cá nhân":
                 btn.clicked.connect(self._handle_open_candidate_profile)
@@ -498,7 +510,7 @@ class _ContentArea(QWidget):
         layout.addSpacing(24)
 
         # ── Feature cards ──────────────────────────────────────────────────────
-        features_title = QLabel("Tính năng")
+        features_title = QLabel("Các tính năng đang sử dụng")
         features_title.setStyleSheet(f"color:{COLOR_NAVY_DARK}; font-size:15px; font-weight:700; margin-bottom:12px;")
         layout.addWidget(features_title)
         layout.addSpacing(8)
@@ -515,6 +527,7 @@ class _ContentArea(QWidget):
         active_features = {
             "candidate": {
                 "Hồ sơ cá nhân",
+                "Khám phá cơ hội",
                 "Lời mời làm bài",
                 "Bài tự luận & Coding",
                 "Giám sát phiên thi",
@@ -527,6 +540,7 @@ class _ContentArea(QWidget):
                 "Nhiệm vụ của tôi",
                 "Hồ sơ doanh nghiệp",
                 "Tuyển dụng & đánh giá",
+                "Hồ sơ ứng tuyển",
                 "Chấm bài tự luận/Coding",
                 "Lịch phỏng vấn",
                 "Chứng chỉ",
@@ -540,7 +554,11 @@ class _ContentArea(QWidget):
                 "Chứng chỉ",
             },
         }
-        for i, (icon, label, desc) in enumerate(cfg["features"]):
+        available_items = [
+            item for item in cfg["features"]
+            if item[1] in active_features.get(self._user.role, set())
+        ]
+        for i, (icon, label, desc) in enumerate(available_items):
             card = self._make_feature_card(
                 icon,
                 label,
@@ -553,32 +571,8 @@ class _ContentArea(QWidget):
         layout.addWidget(grid_widget)
         layout.addSpacing(24)
 
-        # ── Placeholder notice ─────────────────────────────────────────────────
-        notice = QFrame()
-        notice.setObjectName("DashboardNotice")
-        notice.setStyleSheet(f"""
-            QFrame#DashboardNotice {{
-                background-color: rgba(46,134,222,0.08);
-                border: 1.5px dashed {COLOR_ACCENT};
-                border-radius: 10px;
-            }}
-        """)
-        nl = QHBoxLayout(notice)
-        nl.setContentsMargins(20, 16, 20, 16)
-        notice_icon = QLabel("🚧")
-        notice_icon.setStyleSheet("font-size:24px; background:transparent; border:none;")
-        notice_text = QLabel(
-            "<b>Trạng thái chức năng</b><br>"
-            "Các mục có sẵn được mở từ menu bên trái. Những mục chưa tích hợp "
-            "được đánh dấu riêng; dashboard không hiển thị số liệu giả."
-        )
-        notice_text.setStyleSheet(f"color:{COLOR_TEXT_DARK}; font-size:12px; background:transparent; border:none;")
-        notice_text.setWordWrap(True)
-        nl.addWidget(notice_icon)
-        nl.addSpacing(12)
-        nl.addWidget(notice_text)
-        nl.addStretch()
-        layout.addWidget(notice)
+        # Keep the overview focused on available features; unfinished modules
+        # must not look like clickable product functionality.
 
         layout.addStretch()
 
@@ -628,7 +622,7 @@ class _ContentArea(QWidget):
         cl.addLayout(text_col)
         cl.addStretch()
 
-        status = QLabel("Mở từ menu" if available else "Chưa tích hợp")
+        status = QLabel("Trong menu" if available else "")
         status.setStyleSheet(f"""
             color: {COLOR_TEXT_MUTED};
             font-size: 10px;
