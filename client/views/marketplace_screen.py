@@ -468,21 +468,21 @@ class MarketplaceScreen(QWidget):
             summary.setText("Chọn một thẻ bên trái để xem thông tin và thao tác phù hợp.")
         elif kind == "applications":
             summary.setText(
-                f"Doanh nghiệp: {selected.get('company_name') or 'Chưa cập nhật'}\\n"
-                f"Trạng thái: {status_label(selected.get('status'))}\\n"
-                f"Phản hồi: {selected.get('decision_note') or 'Chưa có phản hồi'}\\n"
+                f"Doanh nghiệp: {selected.get('company_name') or 'Chưa cập nhật'}\n"
+                f"Trạng thái: {status_label(selected.get('status'))}\n"
+                f"Phản hồi: {selected.get('decision_note') or 'Chưa có phản hồi'}\n"
                 f"Đề nghị: {status_label(selected.get('offer_response'))}"
             )
         elif kind == "saved":
             summary.setText(
-                f"Doanh nghiệp: {selected.get('company_name') or 'Chưa cập nhật'}\\n"
-                f"Địa điểm: {selected.get('location') or 'Chưa cập nhật'}\\n"
+                f"Doanh nghiệp: {selected.get('company_name') or 'Chưa cập nhật'}\n"
+                f"Địa điểm: {selected.get('location') or 'Chưa cập nhật'}\n"
                 f"Tình trạng: {status_label(selected.get('status'))}"
             )
         else:
             summary.setText(
-                f"Doanh nghiệp: {selected.get('company_name') or 'Chưa cập nhật'}\\n"
-                f"Trạng thái: {status_label(selected.get('status'))}\\n"
+                f"Doanh nghiệp: {selected.get('company_name') or 'Chưa cập nhật'}\n"
+                f"Trạng thái: {status_label(selected.get('status'))}\n"
                 f"Lời nhắn: {selected.get('message') or 'Không có lời nhắn'}"
             )
         self._refresh_candidate_action_states()
