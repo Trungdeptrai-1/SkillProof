@@ -29,7 +29,7 @@ def migrate_offer_responses(conn: sqlite3.Connection) -> None:
         BEFORE INSERT ON application_interviews
         WHEN NEW.offer_response IS NOT NULL OR NEW.offer_responded_at IS NOT NULL
         BEGIN
-            SELECT CASE WHEN NEW.decision!='offered'
+            SELECT CASE WHEN NEW.decision IS NOT 'offered'
                 OR NEW.offer_response IS NULL OR NEW.offer_responded_at IS NULL
                 THEN RAISE(ABORT,'invalid candidate offer response') END;
         END;
@@ -39,7 +39,7 @@ def migrate_offer_responses(conn: sqlite3.Connection) -> None:
         BEGIN
             SELECT CASE WHEN
                 (NEW.offer_response IS NULL) != (NEW.offer_responded_at IS NULL)
-                OR (NEW.offer_response IS NOT NULL AND NEW.decision!='offered')
+                OR (NEW.offer_response IS NOT NULL AND NEW.decision IS NOT 'offered')
                 THEN RAISE(ABORT,'invalid candidate offer response') END;
             SELECT CASE WHEN OLD.offer_response IS NOT NULL
                 AND (NEW.offer_response IS NOT OLD.offer_response
