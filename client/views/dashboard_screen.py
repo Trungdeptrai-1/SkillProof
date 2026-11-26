@@ -74,8 +74,8 @@ ROLE_CONFIG: dict[str, dict] = {
         "accent": "#2E7D32",
     },
     "company": {
-        "title":       "Cổng doanh nghiệp",
-        "description": "Quản lý cơ hội tuyển dụng, ứng viên và quy trình đánh giá.",
+        "title":       "Tổng quan tuyển dụng",
+        "description": "Quản lý toàn bộ quy trình tuyển dụng và đánh giá ứng viên trên một nền tảng.",
         "features": [
             ("🔎", "Tìm chuyên gia",         "Tìm kiếm và gửi lời mời hợp tác"),
             ("📋", "Hợp đồng của tôi",       "Theo dõi hợp đồng với chuyên gia"),
@@ -124,7 +124,7 @@ class _Sidebar(QWidget):
 
     def __init__(self, user: UserModel, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self.setFixedWidth(252)
+        self.setFixedWidth(264)
         self._user = user
         self._on_logout_cb = None
         self._on_open_candidate_profile_cb = None
@@ -214,47 +214,71 @@ class _Sidebar(QWidget):
 
         layout.addSpacing(24)
 
-        # Routes with available screens are connected by MainWindow.
-        cfg = ROLE_CONFIG.get(self._user.role, ROLE_CONFIG["candidate"])
-        for icon, label, _ in cfg["features"]:
-            # Do not render menu entries without a wired destination.
+
+        # Company navigation is grouped around the actual recruitment journey.
+        # Every entry below already has a MainWindow handler.
+        if self._user.role == "company":
+            groups = [
+                ("TUYỂN DỤNG", [
+                    ("▣", "Vị trí tuyển dụng", self._handle_open_company_recruitment),
+                    ("◉", "Hồ sơ ứng tuyển", self._handle_open_marketplace),
+                    ("◷", "Phỏng vấn", lambda: self._handle_open_extended_workflow("interviews")),
+                    ("▤", "Chấm bài đánh giá", lambda: self._handle_open_extended_workflow("manual_grading")),
+                ]),
+                ("HỒ SƠ", [
+                    ("▦", "Thông tin doanh nghiệp", self._handle_open_company_profile),
+                ]),
+                ("HỢP TÁC CHUYÊN MÔN", [
+                    ("⌕", "Tìm chuyên gia", self._handle_open_expert_search),
+                    ("▣", "Hợp đồng chuyên gia", self._handle_open_contracts),
+                    ("✓", "Nhiệm vụ hợp tác", self._handle_open_tasks),
+                ]),
+            ]
+            for section, items in groups:
+                caption = QLabel(section)
+                caption.setStyleSheet(
+                    "QLabel { background: transparent; border: none; color: #AFC2D8;"
+                    " font-size: 10px; font-weight: 700; padding-left: 8px; }"
+                )
+                layout.addWidget(caption)
+                layout.addSpacing(7)
+                for icon, label, handler in items:
+                    btn = self._make_menu_item(icon, label)
+                    btn.clicked.connect(handler)
+                    layout.addWidget(btn)
+                    layout.addSpacing(3)
+                layout.addSpacing(12)
+        else:
+            cfg = ROLE_CONFIG.get(self._user.role, ROLE_CONFIG["candidate"])
             linked = {
                 "candidate": {"Hồ sơ cá nhân", "Lời mời làm bài", "Khám phá cơ hội",
                               "Bài tự luận & Coding", "Giám sát phiên thi", "Phỏng vấn", "Chứng chỉ"},
-                "company": {"Tìm chuyên gia", "Hợp đồng của tôi", "Nhiệm vụ của tôi",
-                            "Hồ sơ doanh nghiệp", "Tuyển dụng & đánh giá", "Hồ sơ ứng tuyển",
-                            "Chấm bài tự luận/Coding", "Lịch phỏng vấn", "Chứng chỉ"},
                 "expert": {"Hồ sơ chuyên gia", "Hợp đồng của tôi", "Nhiệm vụ của tôi",
                            "Chấm bài tự luận/Coding", "Lịch phỏng vấn", "Chứng chỉ"},
             }
-            if label not in linked.get(self._user.role, set()):
-                continue
-            btn = self._make_menu_item(icon, label)
-            if self._user.role == "candidate" and label == "Hồ sơ cá nhân":
-                btn.clicked.connect(self._handle_open_candidate_profile)
-            elif self._user.role == "candidate" and label == "Lời mời làm bài":
-                btn.clicked.connect(self._handle_open_candidate_assessments)
-            elif (self._user.role == "candidate" and label == "Khám phá cơ hội") or (self._user.role == "company" and label == "Hồ sơ ứng tuyển"):
-                btn.clicked.connect(self._handle_open_marketplace)
-            elif self._user.role == "company" and label == "Hồ sơ doanh nghiệp":
-                btn.clicked.connect(self._handle_open_company_profile)
-            elif self._user.role == "company" and label == "Tuyển dụng & đánh giá":
-                btn.clicked.connect(self._handle_open_company_recruitment)
-            elif self._user.role == "company" and label == "Tìm chuyên gia":
-                btn.clicked.connect(self._handle_open_expert_search)
-            elif self._user.role in ("company", "expert") and label == "Hợp đồng của tôi":
-                btn.clicked.connect(self._handle_open_contracts)
-            elif self._user.role in ("company", "expert") and label == "Nhiệm vụ của tôi":
-                btn.clicked.connect(self._handle_open_tasks)
-            elif self._user.role == "expert" and label == "Hồ sơ chuyên gia":
-                btn.clicked.connect(self._handle_open_expert_profile)
-            elif label in EXTENDED_WORKFLOW_ROUTES:
-                btn.clicked.connect(
-                    lambda checked=False, route=EXTENDED_WORKFLOW_ROUTES[label]:
-                    self._handle_open_extended_workflow(route)
-                )
-            layout.addWidget(btn)
-            layout.addSpacing(4)
+            for icon, label, _ in cfg["features"]:
+                if label not in linked.get(self._user.role, set()):
+                    continue
+                btn = self._make_menu_item(icon, label)
+                if self._user.role == "candidate" and label == "Hồ sơ cá nhân":
+                    btn.clicked.connect(self._handle_open_candidate_profile)
+                elif self._user.role == "candidate" and label == "Lời mời làm bài":
+                    btn.clicked.connect(self._handle_open_candidate_assessments)
+                elif self._user.role == "candidate" and label == "Khám phá cơ hội":
+                    btn.clicked.connect(self._handle_open_marketplace)
+                elif self._user.role == "expert" and label == "Hồ sơ chuyên gia":
+                    btn.clicked.connect(self._handle_open_expert_profile)
+                elif self._user.role == "expert" and label == "Hợp đồng của tôi":
+                    btn.clicked.connect(self._handle_open_contracts)
+                elif self._user.role == "expert" and label == "Nhiệm vụ của tôi":
+                    btn.clicked.connect(self._handle_open_tasks)
+                elif label in EXTENDED_WORKFLOW_ROUTES:
+                    btn.clicked.connect(
+                        lambda checked=False, route=EXTENDED_WORKFLOW_ROUTES[label]:
+                        self._handle_open_extended_workflow(route)
+                    )
+                layout.addWidget(btn)
+                layout.addSpacing(3)
 
         layout.addStretch()
 
@@ -291,7 +315,7 @@ class _Sidebar(QWidget):
     def _make_menu_item(self, icon: str, label: str) -> QPushButton:
         btn = QPushButton(f"  {icon}  {label}")
         btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        btn.setFixedHeight(38)
+        btn.setFixedHeight(36)
         btn.setStyleSheet(f"""
             QPushButton {{
                 background: transparent;
@@ -450,14 +474,18 @@ class _Sidebar(QWidget):
 class _ContentArea(QWidget):
     """Vùng nội dung chính, phân biệt tính năng đã nối và chưa tích hợp."""
 
-    def __init__(self, user: UserModel, parent: QWidget | None = None) -> None:
+    def __init__(self, user: UserModel, parent: QWidget | None = None, on_action=None) -> None:
         super().__init__(parent)
+        self._on_action = on_action
         self.setObjectName("DashboardContent")
         self.setStyleSheet(f"QWidget#DashboardContent {{ background-color: {COLOR_OFF_WHITE}; }}")
         self._user = user
         self._setup_ui()
 
     def _setup_ui(self) -> None:
+        if self._user.role == "company":
+            self._setup_company_ui()
+            return
         layout = QVBoxLayout(self)
         layout.setContentsMargins(36, 30, 36, 30)
         layout.setSpacing(0)
@@ -575,6 +603,140 @@ class _ContentArea(QWidget):
         # must not look like clickable product functionality.
 
         layout.addStretch()
+
+    def _setup_company_ui(self) -> None:
+        """Real, actionable recruiting homepage. No dead-end decorative tiles."""
+        from PySide6.QtWidgets import QGridLayout
+
+        scroll = QScrollArea(self)
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        shell = QVBoxLayout(self)
+        shell.setContentsMargins(0, 0, 0, 0)
+        shell.addWidget(scroll)
+
+        body = QWidget()
+        body.setObjectName("CompanyDashboardBody")
+        body.setStyleSheet("QWidget#CompanyDashboardBody { background: #F5F8FC; }")
+        scroll.setWidget(body)
+        layout = QVBoxLayout(body)
+        layout.setContentsMargins(34, 30, 34, 32)
+        layout.setSpacing(18)
+
+        eyebrow = QLabel("KHÔNG GIAN DOANH NGHIỆP")
+        eyebrow.setStyleSheet(
+            "QLabel { color: #3569A2; background: transparent; font-size: 11px;"
+            " font-weight: 700; }"
+        )
+        layout.addWidget(eyebrow)
+        title = QLabel(f"Xin chào, {self._user.display_name}")
+        title.setWordWrap(True)
+        title.setStyleSheet(
+            "QLabel { color: #142B45; background: transparent;"
+            " font-size: 27px; font-weight: 700; }"
+        )
+        layout.addWidget(title)
+        description = QLabel(
+            "Từ đăng tuyển, tiếp nhận ứng viên đến phỏng vấn và đưa ra quyết định."
+        )
+        description.setWordWrap(True)
+        description.setStyleSheet(
+            "QLabel { color: #62748B; background: transparent; font-size: 13px; }"
+        )
+        layout.addWidget(description)
+        layout.addSpacing(9)
+
+        heading = QLabel("Quy trình tuyển dụng")
+        heading.setStyleSheet(
+            "QLabel { color: #142B45; background: transparent;"
+            " font-size: 18px; font-weight: 700; }"
+        )
+        layout.addWidget(heading)
+
+        processes = [
+            ("01", "Quản lý vị trí tuyển dụng",
+             "Tạo tin tuyển dụng, cập nhật trạng thái và thiết lập bài đánh giá.",
+             "positions"),
+            ("02", "Tiếp nhận hồ sơ ứng viên",
+             "Xem hồ sơ ứng tuyển, tìm kiếm ứng viên và gửi lời mời.",
+             "applicants"),
+            ("03", "Phỏng vấn ứng viên",
+             "Theo dõi lịch hẹn, trạng thái và nội dung đánh giá.",
+             "interviews"),
+            ("04", "Đánh giá bài làm",
+             "Chấm bài tự luận, coding và công bố kết quả theo phân quyền.",
+             "grading"),
+        ]
+        grid_holder = QWidget()
+        grid_holder.setObjectName("CompanyActionGrid")
+        grid_holder.setStyleSheet(
+            "QWidget#CompanyActionGrid { background: transparent; }"
+        )
+        grid = QGridLayout(grid_holder)
+        grid.setContentsMargins(0, 0, 0, 0)
+        grid.setSpacing(16)
+
+        for i, (number, name, explanation, route) in enumerate(processes):
+            card = QFrame()
+            card.setObjectName("CompanyActionCard")
+            card.setMinimumHeight(176)
+            card.setStyleSheet(
+                "QFrame#CompanyActionCard { background: #FFFFFF;"
+                " border: 1px solid #DEE7F1; border-radius: 14px; }"
+            )
+            panel = QVBoxLayout(card)
+            panel.setContentsMargins(20, 17, 20, 17)
+            panel.setSpacing(9)
+            step = QLabel(f"BƯỚC {number}")
+            step.setStyleSheet(
+                "QLabel { color: #2563A6; background: transparent;"
+                " font-size: 11px; font-weight: 700; }"
+            )
+            panel.addWidget(step)
+            name_label = QLabel(name)
+            name_label.setWordWrap(True)
+            name_label.setStyleSheet(
+                "QLabel { color: #132D4D; background: transparent;"
+                " font-size: 16px; font-weight: 700; }"
+            )
+            panel.addWidget(name_label)
+            desc = QLabel(explanation)
+            desc.setWordWrap(True)
+            desc.setStyleSheet(
+                "QLabel { color: #66768B; background: transparent; font-size: 12px; }"
+            )
+            panel.addWidget(desc)
+            panel.addStretch()
+            action = QPushButton("Mở chức năng")
+            action.setObjectName("CompanyAction")
+            action.setCursor(Qt.CursorShape.PointingHandCursor)
+            action.setStyleSheet(
+                "QPushButton#CompanyAction { background: #2367B1; color: white;"
+                " border: none; border-radius: 8px; padding: 9px 14px;"
+                " font-size: 12px; font-weight: 700; }"
+                "QPushButton#CompanyAction:hover { background: #174F8C; }"
+            )
+            action.clicked.connect(
+                lambda checked=False, target=route: self._open_company_action(target)
+            )
+            panel.addWidget(action, alignment=Qt.AlignmentFlag.AlignRight)
+            grid.addWidget(card, i // 2, i % 2)
+
+        layout.addWidget(grid_holder)
+        footer = QLabel(
+            "Các chức năng hỗ trợ chuyên môn được sắp xếp riêng trong menu bên trái."
+        )
+        footer.setWordWrap(True)
+        footer.setStyleSheet(
+            "QLabel { color: #697B92; background: transparent; font-size: 12px; }"
+        )
+        layout.addWidget(footer)
+        layout.addStretch()
+
+    def _open_company_action(self, route: str) -> None:
+        if callable(self._on_action):
+            self._on_action(route)
 
     def _make_feature_card(
         self,
@@ -786,7 +948,7 @@ class DashboardScreen(QWidget):
         self._sidebar.on_open_marketplace = self._handle_open_marketplace
         self._sidebar.on_open_extended_workflow = self._handle_open_extended_workflow
 
-        self._content = _ContentArea(self._user)
+        self._content = _ContentArea(self._user, on_action=self._open_company_action)
 
         layout.addWidget(self._sidebar)
         layout.addWidget(self._content, stretch=1)
@@ -801,6 +963,17 @@ class DashboardScreen(QWidget):
         self._anim.setEndValue(1.0)
         self._anim.setEasingCurve(QEasingCurve.Type.OutCubic)
         self._anim.start()
+
+    def _open_company_action(self, route: str) -> None:
+        actions = {
+            "positions": self._handle_open_company_recruitment,
+            "applicants": self._handle_open_marketplace,
+            "interviews": lambda: self._handle_open_extended_workflow("interviews"),
+            "grading": lambda: self._handle_open_extended_workflow("manual_grading"),
+        }
+        action = actions.get(route)
+        if action is not None:
+            action()
 
     def _handle_logout(self) -> None:
         auth_controller.logout()
