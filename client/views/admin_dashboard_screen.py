@@ -201,8 +201,8 @@ class AdminDashboardScreen(QWidget):
         content_layout.addLayout(cards)
 
         note = QLabel(
-            "Thống kê và danh sách được tải từ dữ liệu SQLite qua Admin "
-            "Controller. Kỹ năng được ngừng sử dụng thay vì xóa vật lý."
+            "Số liệu được cập nhật trực tiếp từ hệ thống. "
+            "Chọn một chức năng quản trị để tiếp tục."
         )
         note.setWordWrap(True)
         note.setStyleSheet(
@@ -216,9 +216,10 @@ class AdminDashboardScreen(QWidget):
 
     def _build_sidebar(self) -> QWidget:
         sidebar = QWidget()
-        sidebar.setFixedWidth(240)
+        sidebar.setFixedWidth(252)
+        sidebar.setObjectName("AdminSidebar")
         sidebar.setStyleSheet(
-            "QWidget{background:qlineargradient(x1:0,y1:0,x2:0,y2:1,"
+            "QWidget#AdminSidebar{background:qlineargradient(x1:0,y1:0,x2:0,y2:1,"
             f"stop:0 {COLOR_NAVY_DARK},stop:1 {COLOR_NAVY_MID});}}"
         )
         layout = QVBoxLayout(sidebar)
@@ -282,10 +283,11 @@ class AdminDashboardScreen(QWidget):
         callback: Callable[[], None],
     ) -> tuple[QFrame, QPushButton]:
         card = QFrame()
+        card.setObjectName("AdminActionCard")
         card.setMinimumHeight(190)
         card.setStyleSheet(
-            f"background:{COLOR_WHITE};border:1px solid {COLOR_LIGHT_GRAY};"
-            "border-radius:12px;"
+            f"QFrame#AdminActionCard {{ background:{COLOR_WHITE};border:1px solid {COLOR_LIGHT_GRAY};"
+            "border-radius:14px; }"
         )
         card_layout = QVBoxLayout(card)
         card_layout.setContentsMargins(20, 18, 20, 18)
@@ -311,10 +313,11 @@ class AdminDashboardScreen(QWidget):
     @staticmethod
     def _statistics_card(title: str) -> tuple[QFrame, QLabel]:
         card = QFrame()
+        card.setObjectName("AdminMetricCard")
         card.setMinimumHeight(130)
         card.setStyleSheet(
-            f"background:{COLOR_WHITE};border:1px solid {COLOR_LIGHT_GRAY};"
-            "border-radius:12px;"
+            f"QFrame#AdminMetricCard {{ background:{COLOR_WHITE};border:1px solid {COLOR_LIGHT_GRAY};"
+            "border-radius:14px; }"
         )
         layout = QVBoxLayout(card)
         layout.setContentsMargins(18, 14, 18, 14)

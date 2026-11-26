@@ -29,6 +29,69 @@ QWidget {{
     font-size: 13px;
 }}
 
+/* Neutral baseline: labels do not inherit a panel's border/background.
+   Explicit per-label badges and notices still override this default. */
+QLabel {{
+    background: transparent;
+    border: none;
+    color: {COLOR_TEXT_DARK};
+}}
+
+QLineEdit, QTextEdit, QPlainTextEdit, QComboBox, QDateTimeEdit, QSpinBox {{
+    background-color: {COLOR_WHITE};
+    color: {COLOR_TEXT_DARK};
+    border: 1px solid #D8E1ED;
+    border-radius: 9px;
+    padding: 8px 11px;
+    selection-background-color: #D8EAFF;
+}}
+QLineEdit:focus, QTextEdit:focus, QPlainTextEdit:focus,
+QComboBox:focus, QDateTimeEdit:focus, QSpinBox:focus {{
+    border: 1px solid {COLOR_ACCENT};
+}}
+QLineEdit:disabled, QTextEdit:disabled, QComboBox:disabled {{
+    background-color: #F2F5F9;
+    color: {COLOR_TEXT_MUTED};
+}}
+QPushButton {{
+    border-radius: 9px;
+    padding: 8px 14px;
+}}
+QPushButton:focus {{
+    border: 1px solid {COLOR_ACCENT};
+}}
+QTableWidget, QTableView {{
+    background: {COLOR_WHITE};
+    alternate-background-color: #F7F9FC;
+    border: 1px solid #DAE3EE;
+    border-radius: 10px;
+    gridline-color: #EDF1F7;
+    selection-background-color: #E4F0FF;
+    selection-color: {COLOR_NAVY_DARK};
+}}
+QHeaderView::section {{
+    background: #EEF3FA;
+    color: {COLOR_NAVY_MID};
+    border: none;
+    border-bottom: 1px solid #DAE3EE;
+    padding: 10px;
+    font-weight: 600;
+}}
+QScrollArea {{
+    border: none;
+}}
+QGroupBox {{
+    border: 1px solid #DAE3EE;
+    border-radius: 10px;
+    margin-top: 12px;
+    padding-top: 12px;
+}}
+QGroupBox::title {{
+    subcontrol-origin: margin;
+    left: 12px;
+    padding: 0 5px;
+}}
+
 /* ── Scrollbar ── */
 QScrollBar:vertical {{
     background: {COLOR_LIGHT_GRAY};

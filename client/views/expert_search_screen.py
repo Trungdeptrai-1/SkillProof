@@ -62,14 +62,15 @@ class ExpertSearchScreen(QWidget):
         main.addWidget(content, stretch=1)
 
     def _make_sidebar(self) -> QWidget:
-        sb = QWidget(); sb.setFixedWidth(240)
-        sb.setStyleSheet(f"""QWidget {{background: qlineargradient(x1:0,y1:0,x2:0,y2:1,
+        sb = QWidget(); sb.setFixedWidth(252)
+        sb.setObjectName("WorkflowSidebar")
+        sb.setStyleSheet(f"""QWidget#WorkflowSidebar {{background: qlineargradient(x1:0,y1:0,x2:0,y2:1,
             stop:0 {COLOR_NAVY_DARK}, stop:1 {COLOR_NAVY_MID});}}""")
         lay = QVBoxLayout(sb); lay.setContentsMargins(20, 28, 20, 20); lay.setSpacing(0)
         # Logo
         lr = QHBoxLayout()
         lb = QWidget(); lb.setFixedSize(36, 36)
-        lb.setStyleSheet(f"background:{COLOR_ACCENT};border-radius:10px;")
+        lb.setObjectName("ProfileBrand"); lb.setStyleSheet(f"QWidget#ProfileBrand {{ background:{COLOR_ACCENT};border-radius:10px; }}")
         ll = QVBoxLayout(lb); ll.setContentsMargins(0,0,0,0)
         li = QLabel("✓"); li.setAlignment(Qt.AlignmentFlag.AlignCenter)
         li.setStyleSheet(f"color:{COLOR_WHITE};font-size:18px;font-weight:700;background:transparent;")
@@ -83,6 +84,8 @@ class ExpertSearchScreen(QWidget):
             ("🔎", "Tìm kiếm chuyên gia", True),
             ("📋", "Hợp đồng của tôi", False),
         ]:
+            if active:
+                continue  # Already on this screen; avoid dead-end navigation controls.
             btn = QPushButton(f"  {icon}  {text}"); btn.setFixedHeight(38)
             bg = "rgba(46,134,222,0.2)" if active else "transparent"
             clr = COLOR_WHITE if active else "rgba(255,255,255,0.75)"
@@ -105,10 +108,11 @@ class ExpertSearchScreen(QWidget):
     def _make_content(self) -> QWidget:
         scroll = QScrollArea(); scroll.setWidgetResizable(True)
         scroll.setStyleSheet(f"QScrollArea{{border:none;background:{COLOR_OFF_WHITE};}}")
-        w = QWidget(); w.setStyleSheet(f"background:{COLOR_OFF_WHITE};")
+        w = QWidget(); w.setObjectName("WorkflowContent"); w.setStyleSheet(f"QWidget#WorkflowContent {{ background:{COLOR_OFF_WHITE}; }}")
         cl = QVBoxLayout(w); cl.setContentsMargins(32, 28, 32, 28); cl.setSpacing(16)
         # Header
-        hdr = QFrame(); hdr.setStyleSheet(f"QFrame{{background:{COLOR_WHITE};border-radius:12px;border:1px solid {COLOR_LIGHT_GRAY};}}")
+        hdr = QFrame(); hdr.setObjectName("UiPanel_hdr")
+        hdr.setStyleSheet(f"QFrame#UiPanel_hdr{{background:{COLOR_WHITE};border-radius:12px;border:1px solid {COLOR_LIGHT_GRAY};}}")
         hl = QHBoxLayout(hdr); hl.setContentsMargins(24, 20, 24, 20)
         left = QVBoxLayout()
         left.addWidget(self._lbl("Tìm kiếm chuyên gia", size=22, bold=True, color=COLOR_NAVY_DARK))
@@ -120,7 +124,8 @@ class ExpertSearchScreen(QWidget):
         self._banner.setStyleSheet(f"background:transparent;color:{COLOR_ERROR};font-size:12px;min-height:20px;")
         self._banner.hide(); cl.addWidget(self._banner)
         # Filter card
-        fc = QFrame(); fc.setStyleSheet(f"QFrame{{background:{COLOR_WHITE};border-radius:12px;border:1px solid {COLOR_LIGHT_GRAY};}}")
+        fc = QFrame(); fc.setObjectName("UiPanel_fc")
+        fc.setStyleSheet(f"QFrame#UiPanel_fc{{background:{COLOR_WHITE};border-radius:12px;border:1px solid {COLOR_LIGHT_GRAY};}}")
         fl = QHBoxLayout(fc); fl.setContentsMargins(20, 16, 20, 16); fl.setSpacing(12)
         self._spec_input = QLineEdit(); self._spec_input.setPlaceholderText("Lĩnh vực (vd: Python, AI...)")
         self._spec_input.setFixedHeight(40); self._spec_input.setStyleSheet(self._input_css())
@@ -177,7 +182,8 @@ class ExpertSearchScreen(QWidget):
 
     def _make_expert_card(self, expert: ExpertSearchResult) -> QFrame:
         card = QFrame()
-        card.setStyleSheet(f"""QFrame{{background:{COLOR_WHITE};border-radius:12px;border:1px solid {COLOR_LIGHT_GRAY};}}""")
+        card.setObjectName("UiPanel_card")
+        card.setStyleSheet(f"""QFrame#UiPanel_card{{background:{COLOR_WHITE};border-radius:12px;border:1px solid {COLOR_LIGHT_GRAY};}}""")
         cl = QHBoxLayout(card); cl.setContentsMargins(20, 16, 20, 16); cl.setSpacing(16)
         # Avatar placeholder
         av = QWidget(); av.setFixedSize(48, 48)

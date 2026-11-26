@@ -78,15 +78,32 @@ class CandidateAssessmentScreen(QWidget):
         self._on_back_cb = callback
 
     def _setup_ui(self) -> None:
-        self.setStyleSheet(f"background:{COLOR_OFF_WHITE};")
+        self.setObjectName("RecruitmentWorkspace")
+        self.setStyleSheet(f"""
+            QWidget#RecruitmentWorkspace {{ background: {COLOR_OFF_WHITE}; }}
+            QTabWidget::pane {{ background: transparent; border: none; }}
+            QTabBar::tab {{ background: transparent; color: #61758E;
+                padding: 12px 20px; border: none;
+                border-bottom: 2px solid transparent; }}
+            QTabBar::tab:selected {{ color: #1E4D7B;
+                border-bottom: 2px solid {COLOR_NAVY_DARK}; font-weight: 700; }}
+            QTabBar::tab:hover {{ color: #1E4D7B; }}
+            QTableWidget {{ background: white; alternate-background-color: #F7F9FC;
+                gridline-color: #E8EDF4; border: 1px solid #DDE6EF;
+                border-radius: 11px; selection-background-color: #E6F1FF;
+                selection-color: #112C46; }}
+            QHeaderView::section {{ background: #EEF3F9;
+                color: #425674; padding: 11px; border: none;
+                border-bottom: 1px solid #DFE7F1; font-weight: 600; }}
+        """)
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(28, 24, 28, 24)
-        layout.setSpacing(12)
+        layout.setContentsMargins(34, 30, 34, 28)
+        layout.setSpacing(16)
 
         header = QHBoxLayout()
         title = QLabel("Lời mời và bài thi")
         title.setStyleSheet(
-            f"color:{COLOR_NAVY_DARK};font-size:23px;font-weight:700;"
+            f"color:{COLOR_NAVY_DARK};font-size:25px;font-weight:700;"
         )
         self._back_button = QPushButton("← Quay lại Dashboard")
         self._back_button.setStyleSheet(secondary_button_style(font_size=12))

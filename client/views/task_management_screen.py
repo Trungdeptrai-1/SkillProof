@@ -64,13 +64,14 @@ class TaskManagementScreen(QWidget):
         main.addWidget(self._make_sidebar()); main.addWidget(self._make_content(), stretch=1)
 
     def _make_sidebar(self) -> QWidget:
-        sb = QWidget(); sb.setFixedWidth(240)
-        sb.setStyleSheet(f"""QWidget{{background:qlineargradient(x1:0,y1:0,x2:0,y2:1,
+        sb = QWidget(); sb.setFixedWidth(252)
+        sb.setObjectName("WorkflowSidebar")
+        sb.setStyleSheet(f"""QWidget#WorkflowSidebar{{background:qlineargradient(x1:0,y1:0,x2:0,y2:1,
             stop:0 {COLOR_NAVY_DARK}, stop:1 {COLOR_NAVY_MID});}}""")
         lay = QVBoxLayout(sb); lay.setContentsMargins(20,28,20,20); lay.setSpacing(0)
         lr = QHBoxLayout()
         lb = QWidget(); lb.setFixedSize(36,36)
-        lb.setStyleSheet(f"background:{COLOR_ACCENT};border-radius:10px;")
+        lb.setObjectName("ProfileBrand"); lb.setStyleSheet(f"QWidget#ProfileBrand {{ background:{COLOR_ACCENT};border-radius:10px; }}")
         ll = QVBoxLayout(lb); ll.setContentsMargins(0,0,0,0)
         li = QLabel("✓"); li.setAlignment(Qt.AlignmentFlag.AlignCenter)
         li.setStyleSheet(f"color:{COLOR_WHITE};font-size:18px;font-weight:700;background:transparent;")
@@ -79,11 +80,9 @@ class TaskManagementScreen(QWidget):
         lr.addWidget(al); lr.addStretch(); lay.addLayout(lr); lay.addSpacing(28)
         div = QFrame(); div.setFrameShape(QFrame.Shape.HLine)
         div.setStyleSheet("color:rgba(255,255,255,0.15);"); lay.addWidget(div); lay.addSpacing(20)
-        for icon, text in [("🎯", "Nhiệm vụ của tôi")]:
-            btn = QPushButton(f"  {icon}  {text}"); btn.setFixedHeight(38)
-            btn.setStyleSheet(f"""QPushButton{{background:rgba(46,134,222,0.2);color:{COLOR_WHITE};
-                border:none;border-radius:8px;font-size:12px;text-align:left;padding-left:8px;}}""")
-            lay.addWidget(btn); lay.addSpacing(4)
+        current = QLabel("NHIỆM VỤ CỦA TÔI")
+        current.setStyleSheet("QLabel { color: #D4E5F7; font-size: 11px; font-weight: 700; background: transparent; border: none; }")
+        lay.addWidget(current); lay.addSpacing(12)
         lay.addStretch()
         back_btn = QPushButton("  ←  Quay lại Dashboard"); back_btn.setFixedHeight(40)
         back_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -96,10 +95,11 @@ class TaskManagementScreen(QWidget):
     def _make_content(self) -> QWidget:
         scroll = QScrollArea(); scroll.setWidgetResizable(True)
         scroll.setStyleSheet(f"QScrollArea{{border:none;background:{COLOR_OFF_WHITE};}}")
-        w = QWidget(); w.setStyleSheet(f"background:{COLOR_OFF_WHITE};")
-        self._cl = QVBoxLayout(w); self._cl.setContentsMargins(32,28,32,28); self._cl.setSpacing(16)
+        w = QWidget(); w.setObjectName("WorkflowContent"); w.setStyleSheet(f"QWidget#WorkflowContent {{ background:{COLOR_OFF_WHITE}; }}")
+        self._cl = QVBoxLayout(w); self._cl.setContentsMargins(36,32,36,32); self._cl.setSpacing(16)
         # Header
-        hdr = QFrame(); hdr.setStyleSheet(f"QFrame{{background:{COLOR_WHITE};border-radius:12px;border:1px solid {COLOR_LIGHT_GRAY};}}")
+        hdr = QFrame(); hdr.setObjectName("UiPanel_hdr")
+        hdr.setStyleSheet(f"QFrame#UiPanel_hdr{{background:{COLOR_WHITE};border-radius:12px;border:1px solid {COLOR_LIGHT_GRAY};}}")
         hl = QHBoxLayout(hdr); hl.setContentsMargins(24,20,24,20)
         left = QVBoxLayout()
         left.addWidget(self._lbl("Quản lý nhiệm vụ", size=22, bold=True, color=COLOR_NAVY_DARK))
@@ -119,7 +119,8 @@ class TaskManagementScreen(QWidget):
             self._create_panel = self._make_create_panel()
             self._cl.addWidget(self._create_panel)
         # Filter
-        ff = QFrame(); ff.setStyleSheet(f"QFrame{{background:{COLOR_WHITE};border-radius:10px;border:1px solid {COLOR_LIGHT_GRAY};}}")
+        ff = QFrame(); ff.setObjectName("UiPanel_ff")
+        ff.setStyleSheet(f"QFrame#UiPanel_ff{{background:{COLOR_WHITE};border-radius:10px;border:1px solid {COLOR_LIGHT_GRAY};}}")
         fl = QHBoxLayout(ff); fl.setContentsMargins(16,12,16,12); fl.setSpacing(12)
         fl.addWidget(self._lbl("Lọc:", size=12))
         self._status_filter = QComboBox(); self._status_filter.setFixedHeight(36)
@@ -140,7 +141,8 @@ class TaskManagementScreen(QWidget):
 
     def _make_create_panel(self) -> QFrame:
         panel = QFrame()
-        panel.setStyleSheet(f"QFrame{{background:{COLOR_WHITE};border-radius:12px;border:1px solid {COLOR_LIGHT_GRAY};}}")
+        panel.setObjectName("UiPanel_panel")
+        panel.setStyleSheet(f"QFrame#UiPanel_panel{{background:{COLOR_WHITE};border-radius:12px;border:1px solid {COLOR_LIGHT_GRAY};}}")
         cl = QVBoxLayout(panel); cl.setContentsMargins(20,16,20,16); cl.setSpacing(10)
         cl.addWidget(self._lbl("Tạo nhiệm vụ mới", size=14, bold=True))
         # Row 1: title + type
@@ -212,7 +214,8 @@ class TaskManagementScreen(QWidget):
 
     def _make_task_card(self, t: TaskModel) -> QFrame:
         card = QFrame()
-        card.setStyleSheet(f"QFrame{{background:{COLOR_WHITE};border-radius:12px;border:1px solid {COLOR_LIGHT_GRAY};}}")
+        card.setObjectName("UiPanel_card")
+        card.setStyleSheet(f"QFrame#UiPanel_card{{background:{COLOR_WHITE};border-radius:12px;border:1px solid {COLOR_LIGHT_GRAY};}}")
         cl = QVBoxLayout(card); cl.setContentsMargins(20,14,20,14); cl.setSpacing(6)
         # Status + type row
         sr = QHBoxLayout(); sr.setSpacing(8)

@@ -65,13 +65,14 @@ class ContractManagementScreen(QWidget):
         main.addWidget(self._make_content(), stretch=1)
 
     def _make_sidebar(self) -> QWidget:
-        sb = QWidget(); sb.setFixedWidth(240)
-        sb.setStyleSheet(f"""QWidget{{background:qlineargradient(x1:0,y1:0,x2:0,y2:1,
+        sb = QWidget(); sb.setFixedWidth(252)
+        sb.setObjectName("WorkflowSidebar")
+        sb.setStyleSheet(f"""QWidget#WorkflowSidebar{{background:qlineargradient(x1:0,y1:0,x2:0,y2:1,
             stop:0 {COLOR_NAVY_DARK}, stop:1 {COLOR_NAVY_MID});}}""")
         lay = QVBoxLayout(sb); lay.setContentsMargins(20,28,20,20); lay.setSpacing(0)
         lr = QHBoxLayout()
         lb = QWidget(); lb.setFixedSize(36,36)
-        lb.setStyleSheet(f"background:{COLOR_ACCENT};border-radius:10px;")
+        lb.setObjectName("ProfileBrand"); lb.setStyleSheet(f"QWidget#ProfileBrand {{ background:{COLOR_ACCENT};border-radius:10px; }}")
         ll = QVBoxLayout(lb); ll.setContentsMargins(0,0,0,0)
         li = QLabel("✓"); li.setAlignment(Qt.AlignmentFlag.AlignCenter)
         li.setStyleSheet(f"color:{COLOR_WHITE};font-size:18px;font-weight:700;background:transparent;")
@@ -84,6 +85,8 @@ class ContractManagementScreen(QWidget):
             ("📋", "Hợp đồng của tôi", True),
             ("🔎", "Tìm chuyên gia", False),
         ]:
+            if text == "Hợp đồng của tôi":
+                continue  # Already on this screen; avoid dead-end navigation controls.
             btn = QPushButton(f"  {icon}  {text}"); btn.setFixedHeight(38)
             bg = "rgba(46,134,222,0.2)" if is_active else "transparent"
             clr = COLOR_WHITE if is_active else "rgba(255,255,255,0.75)"
@@ -105,10 +108,11 @@ class ContractManagementScreen(QWidget):
     def _make_content(self) -> QWidget:
         scroll = QScrollArea(); scroll.setWidgetResizable(True)
         scroll.setStyleSheet(f"QScrollArea{{border:none;background:{COLOR_OFF_WHITE};}}")
-        w = QWidget(); w.setStyleSheet(f"background:{COLOR_OFF_WHITE};")
-        self._cl = QVBoxLayout(w); self._cl.setContentsMargins(32,28,32,28); self._cl.setSpacing(16)
+        w = QWidget(); w.setObjectName("WorkflowContent"); w.setStyleSheet(f"QWidget#WorkflowContent {{ background:{COLOR_OFF_WHITE}; }}")
+        self._cl = QVBoxLayout(w); self._cl.setContentsMargins(36,32,36,32); self._cl.setSpacing(16)
         # Header
-        hdr = QFrame(); hdr.setStyleSheet(f"QFrame{{background:{COLOR_WHITE};border-radius:12px;border:1px solid {COLOR_LIGHT_GRAY};}}")
+        hdr = QFrame(); hdr.setObjectName("UiPanel_hdr")
+        hdr.setStyleSheet(f"QFrame#UiPanel_hdr{{background:{COLOR_WHITE};border-radius:12px;border:1px solid {COLOR_LIGHT_GRAY};}}")
         hl = QHBoxLayout(hdr); hl.setContentsMargins(24,20,24,20)
         left = QVBoxLayout()
         left.addWidget(self._lbl("Quản lý hợp đồng", size=22, bold=True, color=COLOR_NAVY_DARK))
@@ -124,7 +128,8 @@ class ContractManagementScreen(QWidget):
         self._banner.setStyleSheet(f"background:transparent;color:{COLOR_ERROR};font-size:12px;min-height:20px;")
         self._banner.hide(); self._cl.addWidget(self._banner)
         # Filter
-        ff = QFrame(); ff.setStyleSheet(f"QFrame{{background:{COLOR_WHITE};border-radius:10px;border:1px solid {COLOR_LIGHT_GRAY};}}")
+        ff = QFrame(); ff.setObjectName("UiPanel_ff")
+        ff.setStyleSheet(f"QFrame#UiPanel_ff{{background:{COLOR_WHITE};border-radius:10px;border:1px solid {COLOR_LIGHT_GRAY};}}")
         fl = QHBoxLayout(ff); fl.setContentsMargins(16,12,16,12); fl.setSpacing(12)
         fl.addWidget(self._lbl("Lọc:", size=12))
         self._status_filter = QComboBox(); self._status_filter.setFixedHeight(36)
@@ -168,7 +173,8 @@ class ContractManagementScreen(QWidget):
 
     def _make_contract_card(self, c: ContractModel) -> QFrame:
         card = QFrame()
-        card.setStyleSheet(f"QFrame{{background:{COLOR_WHITE};border-radius:12px;border:1px solid {COLOR_LIGHT_GRAY};}}")
+        card.setObjectName("UiPanel_card")
+        card.setStyleSheet(f"QFrame#UiPanel_card{{background:{COLOR_WHITE};border-radius:12px;border:1px solid {COLOR_LIGHT_GRAY};}}")
         cl = QVBoxLayout(card); cl.setContentsMargins(20,16,20,16); cl.setSpacing(8)
         # Header row
         icon, color, label = STATUS_LABELS.get(c.status, ("?", "#999", c.status))

@@ -16,7 +16,7 @@ def add_workflow_header(
     header = QHBoxLayout()
     title_label = QLabel(title)
     title_label.setStyleSheet(
-        f"color:{COLOR_NAVY_DARK};font-size:23px;font-weight:700;"
+        f"color:{COLOR_NAVY_DARK};font-size:25px;font-weight:700;"
     )
     back_button = QPushButton("← Quay lại Dashboard")
     back_button.setStyleSheet(secondary_button_style(font_size=12))
