@@ -154,6 +154,8 @@ def _apply_migrations(conn: sqlite3.Connection) -> None:
     migrate_direct_invitations(conn)
     from server.database.hiring_decision_migration import migrate_hiring_decisions
     migrate_hiring_decisions(conn)
+    from server.database.offer_response_migration import migrate_offer_responses
+    migrate_offer_responses(conn)
 
 
 # ── MIG-001 ───────────────────────────────────────────────────────────────────
