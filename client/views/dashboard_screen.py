@@ -483,7 +483,7 @@ class _ContentArea(QWidget):
         self._setup_ui()
 
     def _setup_ui(self) -> None:
-        if self._user.role == "company":
+        if self._user.role in ("company", "candidate", "expert"):
             self._setup_company_ui()
             return
         layout = QVBoxLayout(self)
@@ -624,7 +624,12 @@ class _ContentArea(QWidget):
         layout.setContentsMargins(34, 30, 34, 32)
         layout.setSpacing(18)
 
-        eyebrow = QLabel("KHÔNG GIAN DOANH NGHIỆP")
+        section_labels = {
+            "company": "KHÔNG GIAN DOANH NGHIỆP",
+            "candidate": "KHÔNG GIAN ỨNG VIÊN",
+            "expert": "KHÔNG GIAN CHUYÊN GIA",
+        }
+        eyebrow = QLabel(section_labels.get(self._user.role, "SKILLPROOF"))
         eyebrow.setStyleSheet(
             "QLabel { color: #3569A2; background: transparent; font-size: 11px;"
             " font-weight: 700; }"
@@ -637,9 +642,12 @@ class _ContentArea(QWidget):
             " font-size: 27px; font-weight: 700; }"
         )
         layout.addWidget(title)
-        description = QLabel(
-            "Từ đăng tuyển, tiếp nhận ứng viên đến phỏng vấn và đưa ra quyết định."
-        )
+        descriptions = {
+            "company": "Từ đăng tuyển, tiếp nhận ứng viên đến phỏng vấn và đưa ra quyết định.",
+            "candidate": "Khám phá cơ hội nghề nghiệp, theo dõi ứng tuyển và hoàn thiện hồ sơ.",
+            "expert": "Quản lý chuyên môn, hợp tác đánh giá và lịch phỏng vấn.",
+        }
+        description = QLabel(descriptions.get(self._user.role, ""))
         description.setWordWrap(True)
         description.setStyleSheet(
             "QLabel { color: #62748B; background: transparent; font-size: 13px; }"
@@ -647,7 +655,11 @@ class _ContentArea(QWidget):
         layout.addWidget(description)
         layout.addSpacing(9)
 
-        heading = QLabel("Quy trình tuyển dụng")
+        heading = QLabel({
+            "company": "Quy trình tuyển dụng",
+            "candidate": "Hành trình tìm việc",
+            "expert": "Công việc chuyên môn",
+        }.get(self._user.role, "Chức năng"))
         heading.setStyleSheet(
             "QLabel { color: #142B45; background: transparent;"
             " font-size: 18px; font-weight: 700; }"
@@ -668,6 +680,28 @@ class _ContentArea(QWidget):
              "Chấm bài tự luận, coding và công bố kết quả theo phân quyền.",
              "grading"),
         ]
+        if self._user.role == "candidate":
+            processes = [
+                ("01", "Khám phá việc làm",
+                 "Tìm kiếm, lưu và ứng tuyển công việc phù hợp.", "jobs"),
+                ("02", "Hồ sơ của tôi",
+                 "Cập nhật thông tin, năng lực và CV.", "candidate_profile"),
+                ("03", "Làm bài đánh giá",
+                 "Xem lời mời và làm bài kiểm tra năng lực.", "candidate_assessment"),
+                ("04", "Theo dõi phỏng vấn",
+                 "Xem lịch và trạng thái buổi phỏng vấn.", "interviews"),
+            ]
+        elif self._user.role == "expert":
+            processes = [
+                ("01", "Hồ sơ chuyên gia",
+                 "Cập nhật chuyên môn và trạng thái cộng tác.", "expert_profile"),
+                ("02", "Chấm bài chuyên môn",
+                 "Đánh giá bài tự luận và lập trình.", "grading"),
+                ("03", "Lịch phỏng vấn",
+                 "Theo dõi các buổi phỏng vấn liên quan.", "interviews"),
+                ("04", "Hợp đồng hợp tác",
+                 "Theo dõi hợp đồng và công việc được phân công.", "contracts"),
+            ]
         grid_holder = QWidget()
         grid_holder.setObjectName("CompanyActionGrid")
         grid_holder.setStyleSheet(
@@ -725,7 +759,7 @@ class _ContentArea(QWidget):
 
         layout.addWidget(grid_holder)
         footer = QLabel(
-            "Các chức năng hỗ trợ chuyên môn được sắp xếp riêng trong menu bên trái."
+            "Bạn cũng có thể mở trực tiếp từng chức năng từ menu bên trái."
         )
         footer.setWordWrap(True)
         footer.setStyleSheet(
@@ -970,6 +1004,11 @@ class DashboardScreen(QWidget):
             "applicants": self._handle_open_marketplace,
             "interviews": lambda: self._handle_open_extended_workflow("interviews"),
             "grading": lambda: self._handle_open_extended_workflow("manual_grading"),
+            "jobs": self._handle_open_marketplace,
+            "candidate_profile": self._handle_open_candidate_profile,
+            "candidate_assessment": self._handle_open_candidate_assessments,
+            "expert_profile": self._handle_open_expert_profile,
+            "contracts": self._handle_open_contracts,
         }
         action = actions.get(route)
         if action is not None:
