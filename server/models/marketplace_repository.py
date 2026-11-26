@@ -218,11 +218,13 @@ class MarketplaceRepository:
                 return []
             return self._rows(self.conn.execute(
                 """SELECT ja.id,ja.candidate_id,ja.status,ja.applied_at,
-                          ja.cover_letter,u.full_name, cp.headline
+                          ja.cover_letter,u.full_name, cp.headline,
+                           ai.offer_response,ai.offer_responded_at
                    FROM job_applications ja
                    JOIN job_postings jp ON jp.id=ja.job_posting_id
                    JOIN users u ON u.id=ja.candidate_id
                    LEFT JOIN candidate_profiles cp ON cp.user_id=ja.candidate_id
+                   LEFT JOIN application_interviews ai ON ai.application_id=ja.id
                    WHERE jp.company_id=? AND jp.id=? ORDER BY ja.applied_at DESC,ja.id DESC""",
                 (company_id, job_id),
             ))
