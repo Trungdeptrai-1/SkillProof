@@ -433,7 +433,6 @@ class MarketplaceScreen(QWidget):
         summary.setWordWrap(True)
         side.addWidget(title)
         side.addWidget(summary)
-        feed.setProperty("detail_panel", panel)
         return feed, side, title, summary
 
     def _candidate_feed_layout(self, parent: QVBoxLayout,
